@@ -62,6 +62,7 @@ wrangler d1 migrations apply DB --local --config wrangler.toml
 wrangler secret put ADMIN_PASSWORD --config wrangler.toml
 wrangler secret put SESSION_SECRET --config wrangler.toml
 wrangler secret put OPENAI_API_KEY --config wrangler.toml
+# Tip: set `keep_vars = true` in wrangler.toml to avoid wiping Dashboard vars on deploy
 ```
 
 部署：
