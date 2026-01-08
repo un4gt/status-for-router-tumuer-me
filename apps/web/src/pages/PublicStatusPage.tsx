@@ -60,6 +60,17 @@ function placeholderCountForWindow(window: WindowKey) {
 	}
 }
 
+function availabilityFromTimeseries(ts: TimeseriesResponse | null, window: WindowKey): number | null {
+	if (!ts || ts.window !== window) return null;
+	let total = 0;
+	let success = 0;
+	for (const p of ts.series) {
+		total += p.total_count ?? 0;
+		success += p.success_count ?? 0;
+	}
+	return total > 0 ? success / total : null;
+}
+
 export function PublicStatusPage() {
 	const [summary, setSummary] = useState<SummaryResponse | null>(null);
 	const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -166,7 +177,10 @@ export function PublicStatusPage() {
 										const now = Date.now();
 										const lastDataTs =
 											(ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
-										const badgeAvailability = c.stats[windowKey].availability;
+										const badgeAvailability =
+											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ??
+											c.stats[windowKey]?.availability ??
+											null;
 										const badgeColor = !c.enabled
 											? 'default'
 											: c.last_status === 'success'
@@ -232,7 +246,10 @@ export function PublicStatusPage() {
 										const now = Date.now();
 										const lastDataTs =
 											(ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
-										const badgeAvailability = c.stats[windowKey].availability;
+										const badgeAvailability =
+											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ??
+											c.stats[windowKey]?.availability ??
+											null;
 										const badgeColor = !c.enabled
 											? 'default'
 											: c.last_status === 'success'
