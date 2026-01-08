@@ -17,5 +17,5 @@ CHECK_INTERVAL_SECONDS = "300"
 [[d1_databases]]
 binding = "DB"
 database_name = "router_status"
-database_id = "00000000-0000-0000-0000-000000000000" # replace with your real D1 database_id for deploy/remote
+database_id = "04968829-0648-426f-bf8c-5fda1d202d46"
 migrations_dir = "apps/worker/migrations"
