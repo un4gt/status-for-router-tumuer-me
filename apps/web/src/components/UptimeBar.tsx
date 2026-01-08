@@ -93,8 +93,9 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 				else if (availability === 0) color = theme.palette.error.main;
 				else color = theme.palette.warning.main;
 
+				const availabilityText = availability === null ? '—' : `${(availability * 100).toFixed(2)}%`;
 				const title = point
-					? `${formatDateTimeShort(ts)}  |  ${success}/${total}  |  ${(availability * 100).toFixed(2)}%${
+					? `${formatDateTimeShort(ts)}  |  ${success}/${total}  |  ${availabilityText}${
 							avgLatency === null ? '' : `  |  ${avgLatency}ms`
 						}`
 					: `${formatDateTimeShort(ts)}  |  No data`;
