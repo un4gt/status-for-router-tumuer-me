@@ -1,0 +1,11 @@
+# Local dev vars for `wrangler dev`
+# Copy to `.dev.vars` (same directory) and fill in real values.
+
+ADMIN_PASSWORD=replace-me
+SESSION_SECRET=replace-me
+OPENAI_API_KEY=replace-me
+
+HEAD_CHECK_URL=https://router.tumuer.me/
+ROUTER_BASE_URL=https://router.tumuer.me/v1
+CHECK_INTERVAL_SECONDS=300
+

@@ -1,0 +1,21 @@
+name = "router-status"
+main = "apps/worker/src/index.ts"
+compatibility_date = "2025-09-06"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+HEAD_CHECK_URL = "https://router.tumuer.me/"
+ROUTER_BASE_URL = "https://router.tumuer.me/v1"
+CHECK_INTERVAL_SECONDS = "300"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "router_status"
+database_id = "00000000-0000-0000-0000-000000000000" # replace with your real D1 database_id for deploy/remote
+migrations_dir = "apps/worker/migrations"

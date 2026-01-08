@@ -1,0 +1,22 @@
+{
+	"name": "@router-status/worker",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev --config ../../wrangler.toml",
+		"deploy": "wrangler deploy --config ../../wrangler.toml",
+		"test": "vitest --config vitest.config.mts",
+		"cf-typegen": "wrangler types --config ../../wrangler.toml"
+	},
+	"dependencies": {
+		"hono": "^4.6.12",
+		"openai": "^4.77.3"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.8.23",
+		"@cloudflare/workers-types": "^4.20260103.0",
+		"typescript": "^5.5.2",
+		"vitest": "~3.2.0",
+		"wrangler": "^4.57.0"
+	}
+}
