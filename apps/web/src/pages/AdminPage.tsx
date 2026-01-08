@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
 	CircularProgress,
 	Dialog,
 	DialogActions,
@@ -12,6 +13,7 @@ import {
 	MenuItem,
 	Paper,
 	Select,
+	Switch,
 	Stack,
 	Table,
 	TableBody,
@@ -23,8 +25,7 @@ import {
 	Typography,
 } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
-import { adminLogin, adminLogout, adminResults, adminRun } from '../api';
-import { DEFAULT_MODELS } from '../constants';
+import { adminChecks, adminCreateModel, adminDeleteCheck, adminLogin, adminLogout, adminResults, adminRun, adminSetCheckEnabled } from '../api';
 import { formatDateTime } from '../format';
 
 type Filter = { type: 'head' } | { type: 'model'; model: string };
@@ -43,14 +44,28 @@ export function AdminPage() {
 
 	const [errorDialog, setErrorDialog] = useState<{ title: string; body: string } | null>(null);
 
+	const [checks, setChecks] = useState<any[]>([]);
+	const [checksError, setChecksError] = useState<string | null>(null);
+	const [checksLoading, setChecksLoading] = useState(false);
+	const [newModel, setNewModel] = useState('');
+
+	const modelChecks = useMemo(() => {
+		return (checks || [])
+			.filter((c) => c.type === 'model' && c.model)
+			.sort((a: any, b: any) => String(a.model).localeCompare(String(b.model)));
+	}, [checks]);
+
 	const queryParams = useMemo(() => {
 		return filter.type === 'head' ? { type: 'head' as const } : { type: 'model' as const, model: filter.model };
 	}, [filter]);
 
 	useEffect(() => {
-		// Probe auth by calling an admin endpoint.
-		adminResults({ ...queryParams, limit: 1 })
-			.then(() => setLoggedIn(true))
+		// Probe auth by calling an admin endpoint that doesn't depend on existing data.
+		adminChecks()
+			.then((r) => {
+				setLoggedIn(true);
+				setChecks(r.checks);
+			})
 			.catch((e: any) => {
 				if (e?.code === 401) setLoggedIn(false);
 				else setLoggedIn(false);
@@ -60,6 +75,35 @@ export function AdminPage() {
 
 	useEffect(() => {
 		if (!loggedIn) return;
+
+		setChecksLoading(true);
+		setChecksError(null);
+		adminChecks()
+			.then((r) => setChecks(r.checks))
+			.catch((e: any) => {
+				if (e?.code === 401) {
+					setLoggedIn(false);
+					return;
+				}
+				setChecksError(e?.message || String(e));
+			})
+			.finally(() => setChecksLoading(false));
+	}, [loggedIn]);
+
+	useEffect(() => {
+		if (!loggedIn) return;
+		if (filter.type === 'model') {
+			const exists = modelChecks.some((c: any) => c.model === filter.model);
+			if (!exists) {
+				const first = modelChecks[0]?.model ?? '';
+				if (first) setFilter({ type: 'model', model: first });
+			}
+		}
+	}, [loggedIn, filter, modelChecks]);
+
+	useEffect(() => {
+		if (!loggedIn) return;
+		if (queryParams.type === 'model' && !queryParams.model) return;
 		setRowsLoading(true);
 		setRowsError(null);
 		adminResults({ ...queryParams, limit: 100 })
@@ -107,6 +151,8 @@ export function AdminPage() {
 						try {
 							await adminLogin(username, password);
 							setLoggedIn(true);
+							const r = await adminChecks();
+							setChecks(r.checks);
 							setPassword('');
 						} catch (e: any) {
 							setAuthError(e?.message || String(e));
@@ -143,6 +189,139 @@ export function AdminPage() {
 				</Stack>
 			</Stack>
 
+			<Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+				<Stack spacing={2}>
+					<Stack direction="row" justifyContent="space-between" alignItems="center">
+						<Typography variant="h6">Models</Typography>
+						{checksLoading ? <CircularProgress size={18} /> : null}
+					</Stack>
+
+					{checksError ? <Alert severity="error">{checksError}</Alert> : null}
+
+					<Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+						<TextField
+							label="Add model"
+							size="small"
+							fullWidth
+							value={newModel}
+							onChange={(e) => setNewModel(e.target.value)}
+							placeholder="e.g. Qwen/Qwen3-Embedding-4B"
+						/>
+						<Button
+							variant="contained"
+							disabled={busy || !newModel.trim()}
+							onClick={async () => {
+								const model = newModel.trim();
+								if (!model) return;
+								setBusy(true);
+								setChecksError(null);
+								try {
+									await adminCreateModel(model, true);
+									setNewModel('');
+									const r = await adminChecks();
+									setChecks(r.checks);
+								} catch (e: any) {
+									setChecksError(e?.message || String(e));
+								} finally {
+									setBusy(false);
+								}
+							}}
+						>
+							Add
+						</Button>
+					</Stack>
+
+					<TableContainer variant="outlined" component={Paper}>
+						<Table size="small">
+							<TableHead>
+								<TableRow>
+									<TableCell>Model</TableCell>
+									<TableCell width={120}>Enabled</TableCell>
+									<TableCell width={120}>Actions</TableCell>
+								</TableRow>
+							</TableHead>
+							<TableBody>
+								{modelChecks.length === 0 ? (
+									<TableRow>
+										<TableCell colSpan={3}>
+											<Typography variant="body2" color="text.secondary">
+												No models yet
+											</Typography>
+										</TableCell>
+									</TableRow>
+								) : (
+									modelChecks.map((c: any) => (
+										<TableRow key={c.id} hover>
+											<TableCell>
+												<Stack direction="row" spacing={1} alignItems="center">
+													<Typography variant="body2" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
+														{c.model}
+													</Typography>
+													<Chip
+														size="small"
+														variant="outlined"
+														label={c.enabled ? 'Enabled' : 'Disabled'}
+														color={c.enabled ? 'success' : 'default'}
+													/>
+												</Stack>
+											</TableCell>
+											<TableCell>
+												<Switch
+													size="small"
+													checked={!!c.enabled}
+													disabled={busy}
+													onChange={async (_e, checked) => {
+														setBusy(true);
+														setChecksError(null);
+														const prev = checks;
+														setChecks((cur) => (cur || []).map((x: any) => (x.id === c.id ? { ...x, enabled: checked } : x)));
+														try {
+															await adminSetCheckEnabled(c.id, checked);
+														} catch (e: any) {
+															setChecks(prev);
+															setChecksError(e?.message || String(e));
+														} finally {
+															setBusy(false);
+														}
+													}}
+												/>
+											</TableCell>
+											<TableCell>
+												<Button
+													size="small"
+													color="error"
+													disabled={busy}
+													onClick={async () => {
+														if (!confirm(`Delete model check "${c.model}"? This will remove its history.`)) return;
+														setBusy(true);
+														setChecksError(null);
+														try {
+															await adminDeleteCheck(c.id);
+															const r = await adminChecks();
+															setChecks(r.checks);
+														} catch (e: any) {
+															setChecksError(e?.message || String(e));
+														} finally {
+															setBusy(false);
+														}
+													}}
+												>
+													Delete
+												</Button>
+											</TableCell>
+										</TableRow>
+									))
+								)}
+							</TableBody>
+						</Table>
+					</TableContainer>
+
+					<Typography variant="caption" color="text.secondary">
+						Disabled models will not be probed by scheduled/manual runs.
+					</Typography>
+				</Stack>
+			</Paper>
+
 			<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
 				<Button
 					variant="contained"
@@ -152,8 +331,12 @@ export function AdminPage() {
 						setRowsError(null);
 						try {
 							await adminRun();
-							const r = await adminResults({ ...queryParams, limit: 100 });
-							setRows(r.results);
+							if (queryParams.type === 'head' || (queryParams.type === 'model' && queryParams.model)) {
+								const r = await adminResults({ ...queryParams, limit: 100 });
+								setRows(r.results);
+							} else {
+								setRows([]);
+							}
 						} catch (e: any) {
 							setRowsError(e?.message || String(e));
 						} finally {
@@ -170,7 +353,13 @@ export function AdminPage() {
 						labelId="type-label"
 						label="Type"
 						value={filter.type}
-						onChange={(e) => setFilter(e.target.value === 'head' ? { type: 'head' } : { type: 'model', model: DEFAULT_MODELS[0] })}
+						onChange={(e) =>
+							setFilter(
+								e.target.value === 'head'
+									? { type: 'head' }
+									: { type: 'model', model: (modelChecks[0]?.model as string) || '' },
+							)
+						}
 					>
 						<MenuItem value="head">HEAD</MenuItem>
 						<MenuItem value="model">MODEL</MenuItem>
@@ -186,9 +375,9 @@ export function AdminPage() {
 							value={filter.model}
 							onChange={(e) => setFilter({ type: 'model', model: e.target.value })}
 						>
-							{DEFAULT_MODELS.map((m) => (
-								<MenuItem key={m} value={m}>
-									{m}
+							{modelChecks.map((c: any) => (
+								<MenuItem key={c.model} value={c.model}>
+									{c.model}
 								</MenuItem>
 							))}
 						</Select>

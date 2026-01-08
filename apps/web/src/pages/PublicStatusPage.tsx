@@ -81,15 +81,15 @@ export function PublicStatusPage() {
 
 	useEffect(() => {
 		if (!summary) return;
-		const enabled = summary.checks.filter((c) => c.enabled);
-		if (enabled.length === 0) return;
+		const items = summary.checks;
+		if (items.length === 0) return;
 
 		let cancelled = false;
 		setTimelineLoading(true);
 		setTimelineError(null);
 
 		Promise.allSettled(
-			enabled.map(async (c) => {
+			items.map(async (c) => {
 				const r = await fetchTimeseries({ type: c.type, model: c.model ?? undefined, window: windowKey });
 				return { id: c.id, r };
 			}),
@@ -160,14 +160,20 @@ export function PublicStatusPage() {
 						<Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
 							<Stack spacing={2} divider={<Divider flexItem />}>
 								{summary.checks
-									.filter((c) => c.enabled && c.type === 'head')
+									.filter((c) => c.type === 'head')
 									.map((c) => {
 										const ts = timelineByCheckId[c.id] ?? null;
 										const now = Date.now();
 										const lastDataTs =
 											(ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
 										const badgeAvailability = c.stats[windowKey].availability;
-										const badgeColor = c.last_status === 'success' ? 'success' : c.last_status === 'failure' ? 'error' : 'default';
+										const badgeColor = !c.enabled
+											? 'default'
+											: c.last_status === 'success'
+												? 'success'
+												: c.last_status === 'failure'
+													? 'error'
+													: 'default';
 
 										return (
 											<Stack key={c.id} spacing={1.25} sx={{ py: 0.5 }}>
@@ -175,9 +181,17 @@ export function PublicStatusPage() {
 													<Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 300 }}>
 														<Chip label={formatPercentShort(badgeAvailability)} color={badgeColor as any} size="small" sx={{ minWidth: 90, fontWeight: 700 }} />
 														<Box>
-															<Typography variant="subtitle1" fontWeight={700}>
-																{checkTitle(c)}
-															</Typography>
+															<Stack direction="row" spacing={1} alignItems="center">
+																<Typography variant="subtitle1" fontWeight={700}>
+																	{checkTitle(c)}
+																</Typography>
+																<Chip
+																	size="small"
+																	variant="outlined"
+																	label={c.enabled ? 'Enabled' : 'Disabled'}
+																	color={c.enabled ? ('success' as any) : ('default' as any)}
+																/>
+															</Stack>
 														</Box>
 													</Stack>
 
@@ -211,7 +225,7 @@ export function PublicStatusPage() {
 						<Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
 							<Stack spacing={2} divider={<Divider flexItem />}>
 								{summary.checks
-									.filter((c) => c.enabled && c.type === 'model')
+									.filter((c) => c.type === 'model')
 									.sort((a, b) => String(a.model).localeCompare(String(b.model)))
 									.map((c) => {
 										const ts = timelineByCheckId[c.id] ?? null;
@@ -219,7 +233,13 @@ export function PublicStatusPage() {
 										const lastDataTs =
 											(ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
 										const badgeAvailability = c.stats[windowKey].availability;
-										const badgeColor = c.last_status === 'success' ? 'success' : c.last_status === 'failure' ? 'error' : 'default';
+										const badgeColor = !c.enabled
+											? 'default'
+											: c.last_status === 'success'
+												? 'success'
+												: c.last_status === 'failure'
+													? 'error'
+													: 'default';
 
 										return (
 											<Stack key={c.id} spacing={1.25} sx={{ py: 0.5 }}>
@@ -227,13 +247,21 @@ export function PublicStatusPage() {
 													<Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 300 }}>
 														<Chip label={formatPercentShort(badgeAvailability)} color={badgeColor as any} size="small" sx={{ minWidth: 90, fontWeight: 700 }} />
 														<Box>
-															<Typography variant="subtitle1" fontWeight={700}>
-																{checkTitle(c)}
-															</Typography>
+															<Stack direction="row" spacing={1} alignItems="center">
+																<Typography variant="subtitle1" fontWeight={700}>
+																	{checkTitle(c)}
+																</Typography>
+																<Chip
+																	size="small"
+																	variant="outlined"
+																	label={c.enabled ? 'Enabled' : 'Disabled'}
+																	color={c.enabled ? ('success' as any) : ('default' as any)}
+																/>
+															</Stack>
 														</Box>
 													</Stack>
 
-													<Box sx={{ flexGrow: 1, minWidth: 260 }}>
+													<Box sx={{ flexGrow: 1, minWidth: 260, opacity: c.enabled ? 1 : 0.55 }}>
 														<UptimeBar
 															loading={timelineLoading}
 															placeholderCount={placeholderCountForWindow(windowKey)}

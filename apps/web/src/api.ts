@@ -49,6 +49,17 @@ export type AdminResultsResponse = {
 	}>;
 };
 
+export type AdminChecksResponse = {
+	checks: Array<{
+		id: string;
+		type: 'head' | 'model';
+		target: string;
+		model: string | null;
+		enabled: boolean;
+		created_at: number;
+	}>;
+};
+
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '';
 
 async function apiFetch(path: string, init?: RequestInit) {
@@ -111,3 +122,42 @@ export async function adminResults(params: { type: 'head' | 'model'; model?: str
 	return (await resp.json()) as AdminResultsResponse;
 }
 
+export async function adminChecks() {
+	const resp = await apiFetch('/api/admin/checks', { credentials: 'include' });
+	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
+	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+	return (await resp.json()) as AdminChecksResponse;
+}
+
+export async function adminCreateModel(model: string, enabled = true) {
+	const resp = await apiFetch('/api/admin/checks', {
+		method: 'POST',
+		credentials: 'include',
+		body: JSON.stringify({ type: 'model', model, enabled }),
+	});
+	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
+	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);
+	return resp.json();
+}
+
+export async function adminSetCheckEnabled(id: string, enabled: boolean) {
+	const resp = await apiFetch('/api/admin/checks', {
+		method: 'PATCH',
+		credentials: 'include',
+		body: JSON.stringify({ id, enabled }),
+	});
+	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
+	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);
+	return resp.json();
+}
+
+export async function adminDeleteCheck(id: string) {
+	const resp = await apiFetch('/api/admin/checks', {
+		method: 'DELETE',
+		credentials: 'include',
+		body: JSON.stringify({ id }),
+	});
+	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
+	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);
+	return resp.json();
+}
