@@ -2,17 +2,16 @@
 	"name": "status-for-router-tumuer-me",
 	"version": "0.0.0",
 	"private": true,
+	"workspaces": [
+		"apps/web",
+		"apps/worker"
+	],
 	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
-		"test": "vitest",
-		"cf-typegen": "wrangler types"
-	},
-	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.8.19",
-		"typescript": "^5.5.2",
-		"vitest": "~3.2.0",
-		"wrangler": "^4.57.0"
+		"dev:web": "bun run --cwd apps/web dev",
+		"dev:web:mock": "bun run --cwd apps/web dev -- --mode mock",
+		"dev:worker": "bun run --cwd apps/worker dev",
+		"build:web": "bun run --cwd apps/web build",
+		"deploy:worker": "bun run --cwd apps/worker deploy",
+		"test:worker": "bun run --cwd apps/worker test"
 	}
 }

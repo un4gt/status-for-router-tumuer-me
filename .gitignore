@@ -53,6 +53,11 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Bun temp/cache (local)
+.bun-cache/
+.bun-tmp/
+.bun-install/
+
 # Snowpack dependency directory (https://snowpack.dev/)
 
 web_modules/
@@ -164,4 +169,5 @@ dist
 !.dev.vars.example
 .env*
 !.env.example
+!.env.mock
 .wrangler/
