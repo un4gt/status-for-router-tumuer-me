@@ -3,11 +3,13 @@ export const DEFAULT_ROUTER_BASE_URL = 'https://router.tumuer.me/v1';
 export const DEFAULT_CHECK_INTERVAL_SECONDS = 300;
 
 export const DEFAULT_MODELS = [
-	'embedding-001',
+	'BAAI/bge-m3',
+	'Qwen/Qwen3-Embedding-0.6B',
 	'text-embedding-004',
-	'text-embedding-3-large',
-	'text-embedding-3-small',
-	'text-embedding-ada-002',
+	'Qwen/Qwen3-Embedding-4B',
+	'embedding-001',
+	'Pro/BAAI/bge-m3',
+	'Qwen/Qwen3-Embedding-8B',
 ] as const;
 
 export type CheckType = 'head' | 'model';
@@ -39,4 +41,3 @@ export function getConfig(env: Env) {
 		checkIntervalSeconds,
 	};
 }
-

@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { DEFAULT_MODELS, type Env, getConfig } from './env';
-import { insertResult, listChecks, upsertCheck } from './db';
+import { countChecksByType, getMeta, insertResult, listChecks, setMeta, upsertCheck } from './db';
 
 const EMBEDDING_INPUT = '这是一段需要转换成向量的文本';
 const MODEL_CONCURRENCY = 3;
@@ -100,8 +100,18 @@ async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) =>
 export async function ensureDefaultChecks(env: Env) {
 	const { headCheckUrl, routerBaseUrl } = getConfig(env);
 	await upsertCheck(env, { id: 'head:router', type: 'head', target: headCheckUrl, model: null });
-	for (const model of DEFAULT_MODELS) {
-		await upsertCheck(env, { id: `model:${model}`, type: 'model', target: routerBaseUrl, model });
+	const modelCount = await countChecksByType(env, 'model');
+	const seeded = await getMeta(env, 'models_seeded');
+	if (modelCount > 0) {
+		if (!seeded) await setMeta(env, 'models_seeded', '1');
+		return;
+	}
+
+	if (modelCount === 0 && !seeded) {
+		for (const model of DEFAULT_MODELS) {
+			await upsertCheck(env, { id: `model:${model}`, type: 'model', target: routerBaseUrl, model });
+		}
+		await setMeta(env, 'models_seeded', '1');
 	}
 }
 

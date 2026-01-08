@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { Env } from './env';
 import { getConfig } from './env';
-import { acquireIntervalLock, forceSetLastRunAt } from './db';
+import { acquireIntervalLock, createCheck, deleteCheck, forceSetLastRunAt, getCheckById, listChecks, setCheckEnabled } from './db';
 import { runAllChecks, ensureDefaultChecks } from './checkRunner';
 import { isRateLimited } from './rateLimit';
 import { signJwt, verifyJwt } from './jwt';
@@ -147,6 +147,72 @@ app.get('/api/admin/results', requireAdmin, async (c) => {
 		.all();
 
 	return c.json({ check_id: checkId, results: res.results ?? [] });
+});
+
+app.get('/api/admin/checks', requireAdmin, async (c) => {
+	await ensureDefaultChecks(c.env);
+	const checks = await listChecks(c.env);
+	return c.json({
+		checks: checks.map((row) => ({
+			id: row.id,
+			type: row.type,
+			target: row.target,
+			model: row.model,
+			enabled: row.enabled === 1,
+			created_at: row.created_at,
+		})),
+	});
+});
+
+app.post('/api/admin/checks', requireAdmin, async (c) => {
+	const env = c.env;
+	const body = await c.req.json().catch(() => null);
+	if (!body || body.type !== 'model') return c.json({ error: 'Only model checks can be created' }, 400);
+
+	const model = typeof body.model === 'string' ? body.model.trim() : '';
+	if (!model) return c.json({ error: 'Missing model' }, 400);
+	if (model.length > 200) return c.json({ error: 'Model too long' }, 400);
+
+	const { routerBaseUrl } = getConfig(env);
+	const id = `model:${model}`;
+
+	const exists = await getCheckById(env, id);
+	if (exists) return c.json({ error: 'Already exists' }, 409);
+
+	const enabled = body.enabled === false ? 0 : 1;
+	await createCheck(env, { id, type: 'model', target: routerBaseUrl, model, enabled });
+	return c.json({ ok: true, id });
+});
+
+app.patch('/api/admin/checks', requireAdmin, async (c) => {
+	const env = c.env;
+	const body = await c.req.json().catch(() => null);
+	const id = typeof body?.id === 'string' ? body.id.trim() : '';
+	const enabled = body?.enabled;
+
+	if (!id) return c.json({ error: 'Missing id' }, 400);
+	if (typeof enabled !== 'boolean') return c.json({ error: 'Missing enabled' }, 400);
+
+	const check = await getCheckById(env, id);
+	if (!check) return c.json({ error: 'Not found' }, 404);
+	if (check.type !== 'model') return c.json({ error: 'Only model checks can be modified' }, 400);
+
+	await setCheckEnabled(env, id, enabled);
+	return c.json({ ok: true });
+});
+
+app.delete('/api/admin/checks', requireAdmin, async (c) => {
+	const env = c.env;
+	const body = await c.req.json().catch(() => null);
+	const id = typeof body?.id === 'string' ? body.id.trim() : '';
+	if (!id) return c.json({ error: 'Missing id' }, 400);
+
+	const check = await getCheckById(env, id);
+	if (!check) return c.json({ error: 'Not found' }, 404);
+	if (check.type !== 'model') return c.json({ error: 'Only model checks can be deleted' }, 400);
+
+	await deleteCheck(env, id);
+	return c.json({ ok: true });
 });
 
 app.notFound((c) => c.json({ error: 'Not Found' }, 404));

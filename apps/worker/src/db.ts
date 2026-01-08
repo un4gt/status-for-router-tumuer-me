@@ -42,6 +42,64 @@ export async function listChecks(env: Env): Promise<CheckRow[]> {
 	return res.results ?? [];
 }
 
+export async function getCheckById(env: Env, checkId: string): Promise<CheckRow | null> {
+	const res = await env.DB.prepare(
+		`SELECT id, type, target, model, enabled, created_at
+     FROM checks
+     WHERE id = ?
+     LIMIT 1`,
+	)
+		.bind(checkId)
+		.first<CheckRow>();
+	return res ?? null;
+}
+
+export async function countChecksByType(env: Env, type: CheckType): Promise<number> {
+	const res = await env.DB.prepare(`SELECT COUNT(*) AS cnt FROM checks WHERE type = ?`)
+		.bind(type)
+		.first<{ cnt: number }>();
+	return Number(res?.cnt ?? 0);
+}
+
+export async function createCheck(
+	env: Env,
+	row: { id: string; type: CheckType; target: string; model?: string | null; enabled?: 0 | 1 },
+) {
+	const now = Date.now();
+	await env.DB.prepare(
+		`INSERT INTO checks (id, type, target, model, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+	)
+		.bind(row.id, row.type, row.target, row.model ?? null, row.enabled ?? 1, now)
+		.run();
+}
+
+export async function setCheckEnabled(env: Env, checkId: string, enabled: boolean) {
+	await env.DB.prepare(`UPDATE checks SET enabled=? WHERE id=?`).bind(enabled ? 1 : 0, checkId).run();
+}
+
+export async function deleteCheck(env: Env, checkId: string) {
+	// D1/SQLite foreign keys may not be enforced; delete dependent rows explicitly.
+	await env.DB.batch([
+		env.DB.prepare(`DELETE FROM results WHERE check_id=?`).bind(checkId),
+		env.DB.prepare(`DELETE FROM checks WHERE id=?`).bind(checkId),
+	]);
+}
+
+export async function getMeta(env: Env, key: string): Promise<string | null> {
+	const res = await env.DB.prepare(`SELECT value FROM meta WHERE key=? LIMIT 1`).bind(key).first<{ value: string }>();
+	return res?.value ?? null;
+}
+
+export async function setMeta(env: Env, key: string, value: string) {
+	await env.DB.prepare(
+		`INSERT INTO meta(key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+	)
+		.bind(key, value)
+		.run();
+}
+
 export async function insertResult(
 	env: Env,
 	row: {
@@ -89,4 +147,3 @@ export async function forceSetLastRunAt(env: Env, nowMs: number) {
 		.bind(String(nowMs))
 		.run();
 }
-
