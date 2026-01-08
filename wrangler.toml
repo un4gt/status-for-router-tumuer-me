@@ -1,7 +1,13 @@
 name = "router-status"
+keep_vars = true
 main = "apps/worker/src/index.ts"
 compatibility_date = "2025-09-06"
 compatibility_flags = ["nodejs_compat"]
+
+# Secrets (set via `wrangler secret put` / Dashboard):
+# - ADMIN_PASSWORD
+# - SESSION_SECRET
+# - OPENAI_API_KEY
 
 [observability]
 enabled = true
