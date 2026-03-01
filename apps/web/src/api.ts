@@ -4,7 +4,7 @@ export type SummaryResponse = {
 	generated_at: number;
 	checks: Array<{
 		id: string;
-		type: 'head' | 'model';
+		type: 'head' | 'model' | 'rerank';
 		target: string;
 		model: string | null;
 		enabled: boolean;
@@ -52,7 +52,7 @@ export type AdminResultsResponse = {
 export type AdminChecksResponse = {
 	checks: Array<{
 		id: string;
-		type: 'head' | 'model';
+		type: 'head' | 'model' | 'rerank';
 		target: string;
 		model: string | null;
 		enabled: boolean;
@@ -80,12 +80,12 @@ export async function fetchSummary(): Promise<SummaryResponse> {
 }
 
 export async function fetchTimeseries(params: {
-	type: 'head' | 'model';
+	type: 'head' | 'model' | 'rerank';
 	model?: string;
 	window: WindowKey;
 }): Promise<TimeseriesResponse> {
 	const qs = new URLSearchParams({ type: params.type, window: params.window });
-	if (params.type === 'model' && params.model) qs.set('model', params.model);
+	if ((params.type === 'model' || params.type === 'rerank') && params.model) qs.set('model', params.model);
 	const resp = await apiFetch(`/api/public/timeseries?${qs.toString()}`);
 	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 	return resp.json();
@@ -113,9 +113,9 @@ export async function adminRun() {
 	return resp.json();
 }
 
-export async function adminResults(params: { type: 'head' | 'model'; model?: string; limit?: number }) {
+export async function adminResults(params: { type: 'head' | 'model' | 'rerank'; model?: string; limit?: number }) {
 	const qs = new URLSearchParams({ type: params.type, limit: String(params.limit ?? 100) });
-	if (params.type === 'model' && params.model) qs.set('model', params.model);
+	if ((params.type === 'model' || params.type === 'rerank') && params.model) qs.set('model', params.model);
 	const resp = await apiFetch(`/api/admin/results?${qs.toString()}`, { credentials: 'include' });
 	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
 	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -129,11 +129,11 @@ export async function adminChecks() {
 	return (await resp.json()) as AdminChecksResponse;
 }
 
-export async function adminCreateModel(model: string, enabled = true) {
+export async function adminCreateCheck(type: 'model' | 'rerank', model: string, enabled = true) {
 	const resp = await apiFetch('/api/admin/checks', {
 		method: 'POST',
 		credentials: 'include',
-		body: JSON.stringify({ type: 'model', model, enabled }),
+		body: JSON.stringify({ type, model, enabled }),
 	});
 	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
 	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);

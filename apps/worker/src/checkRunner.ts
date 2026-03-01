@@ -1,9 +1,11 @@
 import OpenAI from 'openai';
-import { DEFAULT_MODELS, type Env, getConfig } from './env';
+import { DEFAULT_MODELS, DEFAULT_RERANK_MODELS, type Env, getConfig } from './env';
 import { countChecksByType, getMeta, insertResult, listChecks, setMeta, upsertCheck } from './db';
 
 const EMBEDDING_INPUT = '这是一段需要转换成向量的文本';
 const MODEL_CONCURRENCY = 3;
+const RERANK_QUERY = 'Apple';
+const RERANK_DOCUMENTS = ['apple', 'banana', 'fruit', 'vegetable'];
 
 function clampErrorMessage(err: unknown, maxLen = 2000): string {
 	const msg = (() => {
@@ -85,6 +87,64 @@ async function modelEmbeddingCheck(
 	return { success, latencyMs: Math.round(performance.now() - start), error, statusCode };
 }
 
+async function modelRerankCheck(
+	routerBaseUrl: string,
+	apiKey: string,
+	model: string,
+	timeoutMs: number,
+): Promise<{ success: 0 | 1; latencyMs: number; error: string | null; statusCode: number | null }> {
+	const start = performance.now();
+	let success: 0 | 1 = 0;
+	let error: string | null = null;
+	let statusCode: number | null = null;
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort('timeout'), timeoutMs);
+	try {
+		const base = routerBaseUrl.replace(/\/+$/, '');
+		const resp = await fetch(`${base}/rerank`, {
+			method: 'POST',
+			headers: {
+				authorization: `Bearer ${apiKey}`,
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				model,
+				query: RERANK_QUERY,
+				documents: RERANK_DOCUMENTS,
+				top_n: Math.min(4, RERANK_DOCUMENTS.length),
+				return_documents: true,
+				max_chunks_per_doc: 1024,
+				overlap_tokens: 80,
+			}),
+			signal: controller.signal,
+		});
+
+		statusCode = resp.status;
+		if (!resp.ok) {
+			error = `HTTP ${resp.status}`;
+			success = 0;
+			return { success, latencyMs: Math.round(performance.now() - start), error, statusCode };
+		}
+
+		const json = await resp.json().catch(() => null);
+		const items = Array.isArray((json as any)?.results)
+			? (json as any).results
+			: Array.isArray((json as any)?.data)
+				? (json as any).data
+				: null;
+
+		success = Array.isArray(items) && items.length > 0 ? 1 : 0;
+		if (!success) error = 'Missing rerank results';
+	} catch (err) {
+		error = clampErrorMessage(err);
+	} finally {
+		clearTimeout(timeout);
+	}
+
+	return { success, latencyMs: Math.round(performance.now() - start), error, statusCode };
+}
+
 async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
 	let index = 0;
 	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -100,18 +160,29 @@ async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) =>
 export async function ensureDefaultChecks(env: Env) {
 	const { headCheckUrl, routerBaseUrl } = getConfig(env);
 	await upsertCheck(env, { id: 'head:router', type: 'head', target: headCheckUrl, model: null });
-	const modelCount = await countChecksByType(env, 'model');
-	const seeded = await getMeta(env, 'models_seeded');
-	if (modelCount > 0) {
-		if (!seeded) await setMeta(env, 'models_seeded', '1');
-		return;
-	}
 
-	if (modelCount === 0 && !seeded) {
+	// Seed embedding models
+	const modelCount = await countChecksByType(env, 'model');
+	const modelsSeeded = await getMeta(env, 'models_seeded');
+	if (modelCount === 0 && !modelsSeeded) {
 		for (const model of DEFAULT_MODELS) {
 			await upsertCheck(env, { id: `model:${model}`, type: 'model', target: routerBaseUrl, model });
 		}
 		await setMeta(env, 'models_seeded', '1');
+	} else if (modelCount > 0 && !modelsSeeded) {
+		await setMeta(env, 'models_seeded', '1');
+	}
+
+	// Seed rerank models
+	const rerankCount = await countChecksByType(env, 'rerank');
+	const rerankSeeded = await getMeta(env, 'rerank_models_seeded');
+	if (rerankCount === 0 && !rerankSeeded) {
+		for (const model of DEFAULT_RERANK_MODELS) {
+			await upsertCheck(env, { id: `rerank:${model}`, type: 'rerank', target: routerBaseUrl, model });
+		}
+		await setMeta(env, 'rerank_models_seeded', '1');
+	} else if (rerankCount > 0 && !rerankSeeded) {
+		await setMeta(env, 'rerank_models_seeded', '1');
 	}
 }
 
@@ -141,7 +212,7 @@ export async function runAllChecks(env: Env, opts?: { triggeredBy: 'scheduled' |
 	// MODEL checks
 	const apiKey = env.OPENAI_API_KEY?.trim();
 	if (!apiKey) {
-		for (const check of enabled.filter((c) => c.type === 'model' && c.model)) {
+		for (const check of enabled.filter((c) => (c.type === 'model' || c.type === 'rerank') && c.model)) {
 			const ts = Date.now();
 			await insertResult(env, {
 				check_id: check.id,
@@ -160,6 +231,20 @@ export async function runAllChecks(env: Env, opts?: { triggeredBy: 'scheduled' |
 	await mapWithConcurrency(modelChecks, MODEL_CONCURRENCY, async (check) => {
 		const ts = Date.now();
 		const res = await modelEmbeddingCheck(client, check.model!, 15_000);
+		await insertResult(env, {
+			check_id: check.id,
+			ts,
+			success: res.success,
+			status_code: res.statusCode,
+			latency_ms: res.latencyMs,
+			error: res.error,
+		});
+	});
+
+	const rerankChecks = enabled.filter((c) => c.type === 'rerank' && c.model);
+	await mapWithConcurrency(rerankChecks, MODEL_CONCURRENCY, async (check) => {
+		const ts = Date.now();
+		const res = await modelRerankCheck(routerBaseUrl, apiKey, check.model!, 15_000);
 		await insertResult(env, {
 			check_id: check.id,
 			ts,

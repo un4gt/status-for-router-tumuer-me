@@ -7,7 +7,7 @@ import { runAllChecks, ensureDefaultChecks } from './checkRunner';
 import { isRateLimited } from './rateLimit';
 import { signJwt, verifyJwt } from './jwt';
 import { getSummary } from './summary';
-import { getTimeseries, type TimeseriesWindow } from './timeseries';
+import { getBucketMs, getTimeseries, type TimeseriesWindow } from './timeseries';
 
 const SESSION_COOKIE = 'router_status_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -67,12 +67,17 @@ app.get('/api/public/timeseries', async (c) => {
 	} else if (type === 'model') {
 		if (!model) return c.json({ error: 'Missing model' }, 400);
 		checkId = `model:${model}`;
+	} else if (type === 'rerank') {
+		if (!model) return c.json({ error: 'Missing model' }, 400);
+		checkId = `rerank:${model}`;
 	} else {
 		return c.json({ error: 'Invalid type' }, 400);
 	}
 
 	await ensureDefaultChecks(c.env);
-	return c.json({ check_id: checkId, ...(await getTimeseries(c.env, checkId, window)) });
+	const { checkIntervalSeconds } = getConfig(c.env);
+	const bucketMs = getBucketMs(window, { minBucketMs: checkIntervalSeconds * 1000 });
+	return c.json({ check_id: checkId, ...(await getTimeseries(c.env, checkId, window, Date.now(), { bucketMs })) });
 });
 
 // Admin API
@@ -132,6 +137,9 @@ app.get('/api/admin/results', requireAdmin, async (c) => {
 	} else if (type === 'model') {
 		if (!model) return c.json({ error: 'Missing model' }, 400);
 		checkId = `model:${model}`;
+	} else if (type === 'rerank') {
+		if (!model) return c.json({ error: 'Missing model' }, 400);
+		checkId = `rerank:${model}`;
 	} else {
 		return c.json({ error: 'Invalid type' }, 400);
 	}
@@ -167,20 +175,22 @@ app.get('/api/admin/checks', requireAdmin, async (c) => {
 app.post('/api/admin/checks', requireAdmin, async (c) => {
 	const env = c.env;
 	const body = await c.req.json().catch(() => null);
-	if (!body || body.type !== 'model') return c.json({ error: 'Only model checks can be created' }, 400);
+	if (!body || (body.type !== 'model' && body.type !== 'rerank')) {
+		return c.json({ error: 'Only model/rerank checks can be created' }, 400);
+	}
 
 	const model = typeof body.model === 'string' ? body.model.trim() : '';
 	if (!model) return c.json({ error: 'Missing model' }, 400);
 	if (model.length > 200) return c.json({ error: 'Model too long' }, 400);
 
 	const { routerBaseUrl } = getConfig(env);
-	const id = `model:${model}`;
+	const id = `${body.type}:${model}`;
 
 	const exists = await getCheckById(env, id);
 	if (exists) return c.json({ error: 'Already exists' }, 409);
 
 	const enabled = body.enabled === false ? 0 : 1;
-	await createCheck(env, { id, type: 'model', target: routerBaseUrl, model, enabled });
+	await createCheck(env, { id, type: body.type, target: routerBaseUrl, model, enabled });
 	return c.json({ ok: true, id });
 });
 
@@ -195,7 +205,9 @@ app.patch('/api/admin/checks', requireAdmin, async (c) => {
 
 	const check = await getCheckById(env, id);
 	if (!check) return c.json({ error: 'Not found' }, 404);
-	if (check.type !== 'model') return c.json({ error: 'Only model checks can be modified' }, 400);
+	if (check.type !== 'model' && check.type !== 'rerank') {
+		return c.json({ error: 'Only model/rerank checks can be modified' }, 400);
+	}
 
 	await setCheckEnabled(env, id, enabled);
 	return c.json({ ok: true });
@@ -209,7 +221,9 @@ app.delete('/api/admin/checks', requireAdmin, async (c) => {
 
 	const check = await getCheckById(env, id);
 	if (!check) return c.json({ error: 'Not found' }, 404);
-	if (check.type !== 'model') return c.json({ error: 'Only model checks can be deleted' }, 400);
+	if (check.type !== 'model' && check.type !== 'rerank') {
+		return c.json({ error: 'Only model/rerank checks can be deleted' }, 400);
+	}
 
 	await deleteCheck(env, id);
 	return c.json({ ok: true });

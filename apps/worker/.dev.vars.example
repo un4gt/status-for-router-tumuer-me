@@ -7,5 +7,5 @@ OPENAI_API_KEY=replace-me
 
 HEAD_CHECK_URL=https://router.tumuer.me/
 ROUTER_BASE_URL=https://router.tumuer.me/v1
-CHECK_INTERVAL_SECONDS=300
-
+# e.g. 3600 / 60m / 1h / 60*60s
+CHECK_INTERVAL_SECONDS=3600

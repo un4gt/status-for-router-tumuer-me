@@ -25,10 +25,10 @@ import {
 	Typography,
 } from '@mui/material';
 import { useEffect, useMemo, useState } from 'react';
-import { adminChecks, adminCreateModel, adminDeleteCheck, adminLogin, adminLogout, adminResults, adminRun, adminSetCheckEnabled } from '../api';
+import { adminChecks, adminCreateCheck, adminDeleteCheck, adminLogin, adminLogout, adminResults, adminRun, adminSetCheckEnabled } from '../api';
 import { formatDateTime } from '../format';
 
-type Filter = { type: 'head' } | { type: 'model'; model: string };
+type Filter = { type: 'head' } | { type: 'model'; model: string } | { type: 'rerank'; model: string };
 
 export function AdminPage() {
 	const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -48,15 +48,34 @@ export function AdminPage() {
 	const [checksError, setChecksError] = useState<string | null>(null);
 	const [checksLoading, setChecksLoading] = useState(false);
 	const [newModel, setNewModel] = useState('');
+	const [newCheckType, setNewCheckType] = useState<'model' | 'rerank'>('model');
 
-	const modelChecks = useMemo(() => {
+	const embeddingChecks = useMemo(() => {
 		return (checks || [])
 			.filter((c) => c.type === 'model' && c.model)
 			.sort((a: any, b: any) => String(a.model).localeCompare(String(b.model)));
 	}, [checks]);
 
+	const rerankChecks = useMemo(() => {
+		return (checks || [])
+			.filter((c) => c.type === 'rerank' && c.model)
+			.sort((a: any, b: any) => String(a.model).localeCompare(String(b.model)));
+	}, [checks]);
+
+	const modelLikeChecks = useMemo(() => {
+		return (checks || [])
+			.filter((c) => (c.type === 'model' || c.type === 'rerank') && c.model)
+			.sort((a: any, b: any) => {
+				const ta = String(a.type);
+				const tb = String(b.type);
+				if (ta !== tb) return ta.localeCompare(tb);
+				return String(a.model).localeCompare(String(b.model));
+			});
+	}, [checks]);
+
 	const queryParams = useMemo(() => {
-		return filter.type === 'head' ? { type: 'head' as const } : { type: 'model' as const, model: filter.model };
+		if (filter.type === 'head') return { type: 'head' as const };
+		return { type: filter.type as 'model' | 'rerank', model: filter.model };
 	}, [filter]);
 
 	useEffect(() => {
@@ -93,17 +112,23 @@ export function AdminPage() {
 	useEffect(() => {
 		if (!loggedIn) return;
 		if (filter.type === 'model') {
-			const exists = modelChecks.some((c: any) => c.model === filter.model);
+			const exists = embeddingChecks.some((c: any) => c.model === filter.model);
 			if (!exists) {
-				const first = modelChecks[0]?.model ?? '';
+				const first = embeddingChecks[0]?.model ?? '';
 				if (first) setFilter({ type: 'model', model: first });
 			}
+		} else if (filter.type === 'rerank') {
+			const exists = rerankChecks.some((c: any) => c.model === filter.model);
+			if (!exists) {
+				const first = rerankChecks[0]?.model ?? '';
+				if (first) setFilter({ type: 'rerank', model: first });
+			}
 		}
-	}, [loggedIn, filter, modelChecks]);
+	}, [loggedIn, filter, embeddingChecks, rerankChecks]);
 
 	useEffect(() => {
 		if (!loggedIn) return;
-		if (queryParams.type === 'model' && !queryParams.model) return;
+		if ((queryParams.type === 'model' || queryParams.type === 'rerank') && !queryParams.model) return;
 		setRowsLoading(true);
 		setRowsError(null);
 		adminResults({ ...queryParams, limit: 100 })
@@ -192,20 +217,37 @@ export function AdminPage() {
 			<Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
 				<Stack spacing={2}>
 					<Stack direction="row" justifyContent="space-between" alignItems="center">
-						<Typography variant="h6">Models</Typography>
+						<Typography variant="h6">Checks</Typography>
 						{checksLoading ? <CircularProgress size={18} /> : null}
 					</Stack>
 
 					{checksError ? <Alert severity="error">{checksError}</Alert> : null}
 
 					<Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }}>
+						<FormControl size="small" sx={{ minWidth: 160 }}>
+							<InputLabel id="new-check-type-label">Type</InputLabel>
+							<Select
+								labelId="new-check-type-label"
+								label="Type"
+								value={newCheckType}
+								onChange={(e) => setNewCheckType(e.target.value as any)}
+								disabled={busy}
+							>
+								<MenuItem value="model">Embedding</MenuItem>
+								<MenuItem value="rerank">Rerank</MenuItem>
+							</Select>
+						</FormControl>
 						<TextField
 							label="Add model"
 							size="small"
 							fullWidth
 							value={newModel}
 							onChange={(e) => setNewModel(e.target.value)}
-							placeholder="e.g. Qwen/Qwen3-Embedding-4B"
+							placeholder={
+								newCheckType === 'model'
+									? 'e.g. Qwen/Qwen3-Embedding-4B'
+									: 'e.g. Pro/BAAI/bge-reranker-v2-m3'
+							}
 						/>
 						<Button
 							variant="contained"
@@ -216,7 +258,7 @@ export function AdminPage() {
 								setBusy(true);
 								setChecksError(null);
 								try {
-									await adminCreateModel(model, true);
+									await adminCreateCheck(newCheckType, model, true);
 									setNewModel('');
 									const r = await adminChecks();
 									setChecks(r.checks);
@@ -235,23 +277,27 @@ export function AdminPage() {
 						<Table size="small">
 							<TableHead>
 								<TableRow>
+									<TableCell width={120}>Type</TableCell>
 									<TableCell>Model</TableCell>
 									<TableCell width={120}>Enabled</TableCell>
 									<TableCell width={120}>Actions</TableCell>
 								</TableRow>
 							</TableHead>
 							<TableBody>
-								{modelChecks.length === 0 ? (
+								{modelLikeChecks.length === 0 ? (
 									<TableRow>
-										<TableCell colSpan={3}>
+										<TableCell colSpan={4}>
 											<Typography variant="body2" color="text.secondary">
 												No models yet
 											</Typography>
 										</TableCell>
 									</TableRow>
 								) : (
-									modelChecks.map((c: any) => (
+									modelLikeChecks.map((c: any) => (
 										<TableRow key={c.id} hover>
+											<TableCell>
+												<Chip size="small" variant="outlined" label={c.type === 'rerank' ? 'Rerank' : 'Embedding'} />
+											</TableCell>
 											<TableCell>
 												<Stack direction="row" spacing={1} alignItems="center">
 													<Typography variant="body2" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
@@ -292,7 +338,7 @@ export function AdminPage() {
 													color="error"
 													disabled={busy}
 													onClick={async () => {
-														if (!confirm(`Delete model check "${c.model}"? This will remove its history.`)) return;
+														if (!confirm(`Delete ${c.type} check "${c.model}"? This will remove its history.`)) return;
 														setBusy(true);
 														setChecksError(null);
 														try {
@@ -317,7 +363,7 @@ export function AdminPage() {
 					</TableContainer>
 
 					<Typography variant="caption" color="text.secondary">
-						Disabled models will not be probed by scheduled/manual runs.
+						Disabled checks will not be probed by scheduled/manual runs.
 					</Typography>
 				</Stack>
 			</Paper>
@@ -331,7 +377,10 @@ export function AdminPage() {
 						setRowsError(null);
 						try {
 							await adminRun();
-							if (queryParams.type === 'head' || (queryParams.type === 'model' && queryParams.model)) {
+							if (
+								queryParams.type === 'head' ||
+								((queryParams.type === 'model' || queryParams.type === 'rerank') && queryParams.model)
+							) {
 								const r = await adminResults({ ...queryParams, limit: 100 });
 								setRows(r.results);
 							} else {
@@ -353,29 +402,31 @@ export function AdminPage() {
 						labelId="type-label"
 						label="Type"
 						value={filter.type}
-						onChange={(e) =>
-							setFilter(
-								e.target.value === 'head'
-									? { type: 'head' }
-									: { type: 'model', model: (modelChecks[0]?.model as string) || '' },
-							)
-						}
+						onChange={(e) => {
+							const v = e.target.value as any;
+							if (v === 'head') setFilter({ type: 'head' });
+							else if (v === 'model') setFilter({ type: 'model', model: (embeddingChecks[0]?.model as string) || '' });
+							else if (v === 'rerank') setFilter({ type: 'rerank', model: (rerankChecks[0]?.model as string) || '' });
+						}}
 					>
 						<MenuItem value="head">HEAD</MenuItem>
-						<MenuItem value="model">MODEL</MenuItem>
+						<MenuItem value="model">EMBEDDING</MenuItem>
+						<MenuItem value="rerank">RERANK</MenuItem>
 					</Select>
 				</FormControl>
 
-				{filter.type === 'model' ? (
+				{filter.type === 'model' || filter.type === 'rerank' ? (
 					<FormControl size="small" sx={{ minWidth: 260 }}>
 						<InputLabel id="model-label">Model</InputLabel>
 						<Select
 							labelId="model-label"
 							label="Model"
 							value={filter.model}
-							onChange={(e) => setFilter({ type: 'model', model: e.target.value })}
+							onChange={(e) =>
+								setFilter(filter.type === 'model' ? { type: 'model', model: e.target.value } : { type: 'rerank', model: e.target.value })
+							}
 						>
-							{modelChecks.map((c: any) => (
+							{(filter.type === 'model' ? embeddingChecks : rerankChecks).map((c: any) => (
 								<MenuItem key={c.model} value={c.model}>
 									{c.model}
 								</MenuItem>

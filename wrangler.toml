@@ -18,7 +18,7 @@ crons = ["* * * * *"]
 [vars]
 HEAD_CHECK_URL = "https://router.tumuer.me/"
 ROUTER_BASE_URL = "https://router.tumuer.me/v1"
-CHECK_INTERVAL_SECONDS = "300"
+CHECK_INTERVAL_SECONDS = "3600"
 
 [[d1_databases]]
 binding = "DB"

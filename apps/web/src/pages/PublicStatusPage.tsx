@@ -238,8 +238,8 @@ export function PublicStatusPage() {
 						</Typography>
 						<Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
 							<Stack spacing={2} divider={<Divider flexItem />}>
-								{summary.checks
-									.filter((c) => c.type === 'model')
+										{summary.checks
+									.filter((c) => c.type === 'model' || c.type === 'rerank')
 									.sort((a, b) => String(a.model).localeCompare(String(b.model)))
 									.map((c) => {
 										const ts = timelineByCheckId[c.id] ?? null;
@@ -268,6 +268,11 @@ export function PublicStatusPage() {
 																<Typography variant="subtitle1" fontWeight={700}>
 																	{checkTitle(c)}
 																</Typography>
+																{c.type === 'rerank' ? (
+																	<Chip size="small" variant="outlined" label="Rerank" />
+																) : (
+																	<Chip size="small" variant="outlined" label="Embedding" />
+																)}
 																<Chip
 																	size="small"
 																	variant="outlined"

@@ -2,7 +2,7 @@
 
 CREATE TABLE IF NOT EXISTS checks (
 	id TEXT PRIMARY KEY,
-	type TEXT NOT NULL, -- 'head' | 'model'
+	type TEXT NOT NULL, -- 'head' | 'model' | 'rerank'
 	target TEXT NOT NULL,
 	model TEXT NULL,
 	enabled INTEGER NOT NULL DEFAULT 1,

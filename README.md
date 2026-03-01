@@ -6,8 +6,9 @@
 
 - **HEAD 探活**：对 `HEAD_CHECK_URL` 发起 `HEAD` 请求（2xx/3xx 为成功），记录 `status_code / latency_ms / error`
 - **模型 embeddings 探活**：使用 `openai` SDK，基于 `ROUTER_BASE_URL` + `OPENAI_API_KEY` 对多模型执行 `embeddings.create`
+- **模型 rerank 探活**：对 `ROUTER_BASE_URL + /rerank` 发起请求（需要 `OPENAI_API_KEY`），记录 `status_code / latency_ms / error`
 - **可用率统计**：最近 `5h / 24h / 7d / 30d`（success / total / availability + last status）
-- **时间序列聚合**：按窗口自动选桶（5m / 30m / 2h / 6h），返回 `availability` 与 `avg_latency_ms`
+- **时间序列聚合**：按窗口自动选桶（5m / 30m / 2h / 6h，且不会小于 `CHECK_INTERVAL_SECONDS`），返回 `availability` 与 `avg_latency_ms`
 - **管理员登录**：`admin` + `ADMIN_PASSWORD`，httpOnly cookie session（JWT），1 分钟最多 10 次登录尝试/每 IP
 - **定时执行**：Cron 每分钟触发；用 `CHECK_INTERVAL_SECONDS` + D1 `meta.last_run_at` 做间隔控制
 
@@ -30,7 +31,7 @@ Worker 侧（vars，可写在 `wrangler.toml` 或控制台 vars）：
 
 - `ROUTER_BASE_URL`（默认 `https://router.tumuer.me/v1`）
 - `HEAD_CHECK_URL`（默认 `https://router.tumuer.me/`）
-- `CHECK_INTERVAL_SECONDS`（默认 `300`）
+- `CHECK_INTERVAL_SECONDS`（默认 `3600`，支持 `3600 / 60m / 1h / 60*60s`）
 
 ## 数据库（D1）
 

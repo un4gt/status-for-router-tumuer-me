@@ -16,16 +16,24 @@ const BUCKET_MS: Record<TimeseriesWindow, number> = {
 	'30d': 6 * 60 * 60 * 1000,
 };
 
-export function getBucketMs(window: TimeseriesWindow) {
-	return BUCKET_MS[window];
+export function getBucketMs(window: TimeseriesWindow, opts?: { minBucketMs?: number }) {
+	const base = BUCKET_MS[window];
+	const min = opts?.minBucketMs ?? 0;
+	return min > base ? min : base;
 }
 
 export function getFromTs(window: TimeseriesWindow, nowMs = Date.now()) {
 	return nowMs - WINDOW_MS[window];
 }
 
-export async function getTimeseries(env: Env, checkId: string, window: TimeseriesWindow, nowMs = Date.now()) {
-	const bucketMs = getBucketMs(window);
+export async function getTimeseries(
+	env: Env,
+	checkId: string,
+	window: TimeseriesWindow,
+	nowMs = Date.now(),
+	opts?: { bucketMs?: number },
+) {
+	const bucketMs = opts?.bucketMs ?? getBucketMs(window);
 	const from = getFromTs(window, nowMs);
 	const to = nowMs;
 
@@ -62,4 +70,3 @@ export async function getTimeseries(env: Env, checkId: string, window: Timeserie
 
 	return { from, to, window, bucket_ms: bucketMs, series };
 }
-
