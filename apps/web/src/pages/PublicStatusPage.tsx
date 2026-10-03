@@ -23,7 +23,7 @@ function formatAgoShort(ts: number | null, nowMs = Date.now()) {
 	if (!ts) return '—';
 	const delta = Math.max(0, nowMs - ts);
 	if (delta < 60_000) return '刚刚';
-	const mins = Math.round(delta / 60_000);
+	const mins = Math.floor(delta / 60_000);
 	if (mins < 60) return `${mins} 分钟前`;
 	const hours = Math.round(mins / 60);
 	if (hours < 48) return `${hours} 小时前`;
@@ -76,7 +76,7 @@ function availabilityFromTimeseries(ts: TimeseriesResponse | null, window: Windo
 export function PublicStatusPage() {
 	const [summary, setSummary] = useState<SummaryResponse | null>(null);
 	const [summaryError, setSummaryError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
+	const [loading, setLoading] = useState(true);
 
 	const [windowKey, setWindowKey] = useState<WindowKey>('5h');
 	const [timelineLoading, setTimelineLoading] = useState(false);
@@ -84,48 +84,57 @@ export function PublicStatusPage() {
 	const [timelineByCheckId, setTimelineByCheckId] = useState<Record<string, TimeseriesResponse | null>>({});
 
 	useEffect(() => {
-		setLoading(true);
-		setSummaryError(null);
-		fetchSummary()
-			.then((s) => setSummary(s))
-			.catch(() => setSummaryError('状态暂时无法加载，请稍后重试。'))
-			.finally(() => setLoading(false));
-	}, []);
-
-	useEffect(() => {
-		if (!summary) return;
-		const items = summary.checks;
-		if (items.length === 0) return;
-
 		let cancelled = false;
-		setTimelineLoading(true);
-		setTimelineError(null);
+		let refreshing = false;
+		const controller = new AbortController();
 
-		Promise.allSettled(
-			items.map(async (c) => {
-				const r = await fetchTimeseries({ type: c.type, model: c.model ?? undefined, window: windowKey });
-				return { id: c.id, r };
-			}),
-		)
-			.then((settled) => {
+		async function refresh(initial = false) {
+			if (refreshing || cancelled) return;
+			refreshing = true;
+			if (initial) setTimelineLoading(true);
+			const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]);
+			try {
+				const nextSummary = await fetchSummary(signal);
 				if (cancelled) return;
-				const map: Record<string, TimeseriesResponse | null> = {};
-				let anyFailed = false;
-				for (const s of settled) {
-					if (s.status === 'fulfilled') map[s.value.id] = s.value.r;
-					else anyFailed = true;
+				setSummary(nextSummary);
+				setSummaryError(null);
+				const settled = await Promise.allSettled(
+					nextSummary.checks.map((c) => fetchTimeseries({ type: c.type, model: c.model ?? undefined, window: windowKey }, signal)),
+				);
+				if (cancelled) return;
+				setTimelineByCheckId((previous) => {
+					const next: Record<string, TimeseriesResponse | null> = {};
+					settled.forEach((result, index) => {
+						const id = nextSummary.checks[index].id;
+						next[id] = result.status === 'fulfilled' ? result.value : previous[id]?.window === windowKey ? previous[id] : null;
+					});
+					return next;
+				});
+				setTimelineError(settled.some((result) => result.status === 'rejected') ? '部分趋势暂时无法更新，将自动重试。' : null);
+			} catch {
+				if (!cancelled) setSummaryError('状态暂时无法更新，将自动重试。');
+			} finally {
+				refreshing = false;
+				if (!cancelled) {
+					setLoading(false);
+					setTimelineLoading(false);
 				}
-				setTimelineByCheckId(map);
-				if (anyFailed) setTimelineError('部分趋势暂时无法加载，请稍后重试。');
-			})
-			.finally(() => {
-				if (!cancelled) setTimelineLoading(false);
-			});
+			}
+		}
 
+		const refreshWhenVisible = () => {
+			if (document.visibilityState === 'visible') void refresh();
+		};
+		void refresh(true);
+		const timer = window.setInterval(refreshWhenVisible, 60_000);
+		document.addEventListener('visibilitychange', refreshWhenVisible);
 		return () => {
 			cancelled = true;
+			controller.abort();
+			window.clearInterval(timer);
+			document.removeEventListener('visibilitychange', refreshWhenVisible);
 		};
-	}, [summary, windowKey]);
+	}, [windowKey]);
 
 	return (
 		<Stack spacing={3}>
@@ -172,9 +181,8 @@ export function PublicStatusPage() {
 								{summary.checks
 									.filter((c) => c.type === 'head')
 									.map((c) => {
-										const ts = timelineByCheckId[c.id] ?? null;
+										const ts = timelineByCheckId[c.id]?.window === windowKey ? timelineByCheckId[c.id] : null;
 										const now = Date.now();
-										const lastDataTs = (ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
 										const badgeAvailability =
 											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ?? c.stats[windowKey]?.availability ?? null;
 										const badgeColor = !c.enabled
@@ -217,7 +225,7 @@ export function PublicStatusPage() {
 																{timelineLoading ? '…' : ts ? formatAgoShort(ts.from, now) : '—'}
 															</Typography>
 															<Typography variant="caption" color="text.secondary">
-																{timelineLoading ? '…' : formatAgoShort(lastDataTs, now)}
+																上次检测：{formatAgoShort(c.last_checked_at, now)}
 															</Typography>
 														</Stack>
 													</Box>
@@ -242,9 +250,8 @@ export function PublicStatusPage() {
 									.filter((c) => c.type === 'model' || c.type === 'rerank')
 									.sort((a, b) => String(a.model).localeCompare(String(b.model)))
 									.map((c) => {
-										const ts = timelineByCheckId[c.id] ?? null;
+										const ts = timelineByCheckId[c.id]?.window === windowKey ? timelineByCheckId[c.id] : null;
 										const now = Date.now();
-										const lastDataTs = (ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
 										const badgeAvailability =
 											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ?? c.stats[windowKey]?.availability ?? null;
 										const badgeColor = !c.enabled
@@ -292,7 +299,7 @@ export function PublicStatusPage() {
 																{timelineLoading ? '…' : ts ? formatAgoShort(ts.from, now) : '—'}
 															</Typography>
 															<Typography variant="caption" color="text.secondary">
-																{timelineLoading ? '…' : formatAgoShort(lastDataTs, now)}
+																上次检测：{formatAgoShort(c.last_checked_at, now)}
 															</Typography>
 														</Stack>
 													</Box>

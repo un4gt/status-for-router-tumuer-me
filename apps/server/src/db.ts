@@ -110,14 +110,15 @@ export function getLastResultForCheck({ db }: Services, id: string) {
 		.get(id);
 }
 
-export function acquireIntervalLock({ db }: Services, now: number, interval: number) {
+export function acquireScheduledSlot({ db }: Services, now: number, interval: number) {
+	const slotStart = Math.floor(now / interval) * interval;
 	return (
 		db
 			.query(
 				`INSERT INTO meta (key, value) VALUES ('last_run_at', ?)
-		ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<=?`,
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE CAST(meta.value AS INTEGER)<?`,
 			)
-			.run(String(now), now - interval).changes > 0
+			.run(String(now), slotStart).changes > 0
 	);
 }
 

@@ -73,20 +73,19 @@ async function apiFetch(path: string, init?: RequestInit) {
 	return resp;
 }
 
-export async function fetchSummary(): Promise<SummaryResponse> {
-	const resp = await apiFetch('/api/public/summary');
+export async function fetchSummary(signal?: AbortSignal): Promise<SummaryResponse> {
+	const resp = await apiFetch('/api/public/summary', { signal, cache: 'no-store' });
 	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 	return resp.json();
 }
 
-export async function fetchTimeseries(params: {
-	type: 'head' | 'model' | 'rerank';
-	model?: string;
-	window: WindowKey;
-}): Promise<TimeseriesResponse> {
+export async function fetchTimeseries(
+	params: { type: 'head' | 'model' | 'rerank'; model?: string; window: WindowKey },
+	signal?: AbortSignal,
+): Promise<TimeseriesResponse> {
 	const qs = new URLSearchParams({ type: params.type, window: params.window });
 	if ((params.type === 'model' || params.type === 'rerank') && params.model) qs.set('model', params.model);
-	const resp = await apiFetch(`/api/public/timeseries?${qs.toString()}`);
+	const resp = await apiFetch(`/api/public/timeseries?${qs.toString()}`, { signal, cache: 'no-store' });
 	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 	return resp.json();
 }

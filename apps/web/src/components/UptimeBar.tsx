@@ -3,7 +3,7 @@ import type { TimeseriesResponse } from '../api';
 
 function bucketRange(from: number, to: number, step: number) {
 	const start = Math.floor(from / step) * step;
-	const end = Math.floor((to - 1) / step) * step;
+	const end = Math.floor(to / step) * step;
 	const out: number[] = [];
 	for (let ts = start; ts <= end; ts += step) out.push(ts);
 	return out;
@@ -93,9 +93,10 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 				else color = theme.palette.warning.main;
 
 				const availabilityText = availability === null ? '—' : `${(availability * 100).toFixed(2)}%`;
-				const title = point
-					? `${formatDateTimeShort(ts)}  |  ${success}/${total}  |  ${availabilityText}${avgLatency === null ? '' : `  |  ${avgLatency}ms`}`
-					: `${formatDateTimeShort(ts)}  |  暂无数据`;
+				const timeRange = `${formatDateTimeShort(ts)} – ${formatDateTimeShort(ts + bucketMs)}`;
+				const title = point && total > 0
+					? `${timeRange}  |  ${success}/${total}  |  ${availabilityText}${avgLatency === null ? '' : `  |  ${avgLatency}ms`}`
+					: `${timeRange}  |  ${ts + bucketMs > to ? '本时段尚无检测记录' : '暂无检测记录'}`;
 
 				return (
 					<Tooltip key={ts} title={title} arrow>
