@@ -1,4 +1,6 @@
-import type { Env } from './env';
+import type { Services } from './db';
+
+type BucketRow = { bucket_ts: number; total_count: number; success_count: number; avg_latency_ms: number | null };
 
 export type TimeseriesWindow = '5h' | '24h' | '7d' | '30d';
 
@@ -26,8 +28,8 @@ export function getFromTs(window: TimeseriesWindow, nowMs = Date.now()) {
 	return nowMs - WINDOW_MS[window];
 }
 
-export async function getTimeseries(
-	env: Env,
+export function getTimeseries(
+	services: Services,
 	checkId: string,
 	window: TimeseriesWindow,
 	nowMs = Date.now(),
@@ -37,8 +39,9 @@ export async function getTimeseries(
 	const from = getFromTs(window, nowMs);
 	const to = nowMs;
 
-	const res = await env.DB.prepare(
-		`SELECT
+	const res = services.db
+		.query<BucketRow, (string | number)[]>(
+			`SELECT
        (CAST(ts / ? AS INTEGER) * ?) AS bucket_ts,
        COUNT(*) AS total_count,
        SUM(success) AS success_count,
@@ -47,16 +50,10 @@ export async function getTimeseries(
      WHERE check_id = ? AND ts >= ? AND ts <= ?
      GROUP BY bucket_ts
      ORDER BY bucket_ts ASC`,
-	)
-		.bind(bucketMs, bucketMs, checkId, from, to)
-		.all<{
-			bucket_ts: number;
-			total_count: number;
-			success_count: number;
-			avg_latency_ms: number | null;
-		}>();
+		)
+		.all(bucketMs, bucketMs, checkId, from, to);
 
-	const series = (res.results ?? []).map((r) => {
+	const series = res.map((r) => {
 		const total = Number(r.total_count ?? 0);
 		const success = Number(r.success_count ?? 0);
 		return {

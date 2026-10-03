@@ -1,0 +1,28 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: '8787'
+      DATABASE_PATH: /app/data/status.sqlite
+      TRUST_PROXY: 'true'
+    ports:
+      - '127.0.0.1:8787:8787'
+    volumes:
+      - ./data:/app/data
+    stop_grace_period: 90s
+    healthcheck:
+      test:
+        ['CMD', 'bun', '-e', "fetch('http://127.0.0.1:8787/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

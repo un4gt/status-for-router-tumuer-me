@@ -163,11 +163,12 @@ dist
 .yarn/install-state.gz
 .pnp.\*
 
-# wrangler project
-
-.dev.vars*
-!.dev.vars.example
+# Local configuration and persistent data
 .env*
 !.env.example
 !.env.mock
-.wrangler/
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.cache/

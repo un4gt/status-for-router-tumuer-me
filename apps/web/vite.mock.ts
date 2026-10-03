@@ -3,7 +3,7 @@ import type { Plugin } from 'vite';
 
 type WindowKey = '5h' | '24h' | '7d' | '30d';
 
-type CheckType = 'head' | 'model';
+type CheckType = 'head' | 'model' | 'rerank';
 
 type CheckDef = {
 	id: string;
@@ -197,7 +197,7 @@ function generateTimeseries(check: CheckDef, window: WindowKey, nowMs: number) {
 		const success = rng() < check.successRate ? 1 : 0;
 		const baseLatency = check.type === 'head' ? 60 : 120;
 		const jitter = check.type === 'head' ? 80 : 180;
-		const penalty = success ? 0 : (check.type === 'head' ? 120 : 240);
+		const penalty = success ? 0 : check.type === 'head' ? 120 : 240;
 		const avgLatency = Math.round(baseLatency + rng() * jitter + rng() * penalty);
 
 		series.push({
@@ -250,11 +250,7 @@ function generateAdminResults(check: CheckDef, nowMs: number, limit: number) {
 			success,
 			status_code: check.type === 'head' ? (success ? 200 : 503) : success ? 200 : 500,
 			latency_ms: success ? latency : latency + Math.round(rng() * 400),
-			error: success
-				? null
-				: check.type === 'head'
-					? 'HTTP 503 (mock)'
-					: 'Upstream error / timeout (mock)',
+			error: success ? null : check.type === 'head' ? 'HTTP 503 (mock)' : 'Upstream error / timeout (mock)',
 			title: checkTitle(check),
 		});
 	}
@@ -305,9 +301,9 @@ export function mockApiPlugin(): Plugin {
 
 					const check =
 						type === 'head'
-							? checksState.find((c) => c.type === 'head') ?? null
-							: type === 'model' && model
-								? checksState.find((c) => c.type === 'model' && c.model === model) ?? null
+							? (checksState.find((c) => c.type === 'head') ?? null)
+							: (type === 'model' || type === 'rerank') && model
+								? (checksState.find((c) => c.type === type && c.model === model) ?? null)
 								: null;
 
 					if (!check) return sendJson(res, { error: 'Invalid check' }, 400);
@@ -317,6 +313,42 @@ export function mockApiPlugin(): Plugin {
 				// Admin
 				if (url.pathname.startsWith('/api/admin/') && !isAuthed(req) && url.pathname !== '/api/admin/login') {
 					return sendJson(res, { error: 'Unauthorized' }, 401);
+				}
+
+				if (req.method === 'GET' && url.pathname === '/api/admin/models') {
+					return sendJson(res, {
+						models: [
+							...DEFAULT_CHECKS.filter((c) => c.model).map((c) => ({
+								id: c.model,
+								detected_type: 'model',
+								suggested_type: null,
+								unsupported: false,
+							})),
+							{ id: 'Pro/BAAI/bge-reranker-v2-m3', detected_type: 'rerank', suggested_type: null, unsupported: false },
+							{ id: 'custom-embedding', detected_type: null, suggested_type: 'model', unsupported: false },
+							{ id: 'unknown-model', detected_type: null, suggested_type: null, unsupported: false },
+							{ id: 'chat-model', detected_type: null, suggested_type: null, unsupported: true },
+						],
+					});
+				}
+				if (req.method === 'PUT' && url.pathname === '/api/admin/checks/selection') {
+					const body = await readJson(req);
+					if (
+						!Array.isArray(body?.checks) ||
+						body.checks.some((c: any) => !c || !['model', 'rerank'].includes(c.type) || typeof c.model !== 'string' || !c.model.trim())
+					) {
+						return sendJson(res, { error: 'Each model needs a name and an explicit type' }, 400);
+					}
+					const next = checksState.map((c) => (c.type === 'head' ? c : { ...c, enabled: false }));
+					for (const row of body.checks) {
+						const model = row.model.trim();
+						const id = row.type + ':' + model;
+						const existing = next.find((c) => c.id === id);
+						if (existing) existing.enabled = true;
+						else next.push({ id, type: row.type, model, target: 'https://router.tumuer.me/v1', enabled: true, successRate: 0.98 });
+					}
+					checksState = next;
+					return sendJson(res, { ok: true });
 				}
 
 				if (req.method === 'GET' && url.pathname === '/api/admin/checks') {
@@ -334,11 +366,12 @@ export function mockApiPlugin(): Plugin {
 
 				if (req.method === 'POST' && url.pathname === '/api/admin/checks') {
 					const body = await readJson(req);
-					if (!body || body.type !== 'model') return sendJson(res, { error: 'Only model checks can be created' }, 400);
+					if (!body || !['model', 'rerank'].includes(body.type))
+						return sendJson(res, { error: 'Only model/rerank checks can be created' }, 400);
 					const model = typeof body.model === 'string' ? body.model.trim() : '';
 					if (!model) return sendJson(res, { error: 'Missing model' }, 400);
 
-					const id = `model:${model}`;
+					const id = `${body.type}:${model}`;
 					if (checksState.some((c) => c.id === id)) return sendJson(res, { error: 'Already exists' }, 409);
 
 					const enabled = body.enabled !== false;
@@ -346,7 +379,7 @@ export function mockApiPlugin(): Plugin {
 						...checksState,
 						{
 							id,
-							type: 'model',
+							type: body.type,
 							target: 'https://router.tumuer.me/v1',
 							model,
 							enabled,
@@ -366,7 +399,7 @@ export function mockApiPlugin(): Plugin {
 
 					const idx = checksState.findIndex((c) => c.id === id);
 					if (idx === -1) return sendJson(res, { error: 'Not found' }, 404);
-					if (checksState[idx].type !== 'model') return sendJson(res, { error: 'Only model checks can be modified' }, 400);
+					if (checksState[idx].type === 'head') return sendJson(res, { error: 'Only model/rerank checks can be modified' }, 400);
 
 					checksState = checksState.map((c, i) => (i === idx ? { ...c, enabled } : c));
 					return sendJson(res, { ok: true }, 200);
@@ -379,7 +412,7 @@ export function mockApiPlugin(): Plugin {
 
 					const target = checksState.find((c) => c.id === id) ?? null;
 					if (!target) return sendJson(res, { error: 'Not found' }, 404);
-					if (target.type !== 'model') return sendJson(res, { error: 'Only model checks can be deleted' }, 400);
+					if (target.type === 'head') return sendJson(res, { error: 'Only model/rerank checks can be deleted' }, 400);
 
 					checksState = checksState.filter((c) => c.id !== id);
 					return sendJson(res, { ok: true }, 200);
@@ -394,25 +427,15 @@ export function mockApiPlugin(): Plugin {
 						return sendJson(res, { error: 'Invalid credentials (mock: admin/admin)' }, 401);
 					}
 
-					return sendJson(
-						res,
-						{ ok: true, mock: true },
-						200,
-						{
-							'set-cookie': `${SESSION_COOKIE}=${MOCK_SESSION_VALUE}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`,
-						},
-					);
+					return sendJson(res, { ok: true, mock: true }, 200, {
+						'set-cookie': `${SESSION_COOKIE}=${MOCK_SESSION_VALUE}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`,
+					});
 				}
 
 				if (req.method === 'POST' && url.pathname === '/api/admin/logout') {
-					return sendJson(
-						res,
-						{ ok: true, mock: true },
-						200,
-						{
-							'set-cookie': `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
-						},
-					);
+					return sendJson(res, { ok: true, mock: true }, 200, {
+						'set-cookie': `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
+					});
 				}
 
 				if (req.method === 'POST' && url.pathname === '/api/admin/run') {
@@ -426,9 +449,9 @@ export function mockApiPlugin(): Plugin {
 
 					const check =
 						type === 'head'
-							? checksState.find((c) => c.type === 'head') ?? null
-							: type === 'model' && model
-								? checksState.find((c) => c.type === 'model' && c.model === model) ?? null
+							? (checksState.find((c) => c.type === 'head') ?? null)
+							: (type === 'model' || type === 'rerank') && model
+								? (checksState.find((c) => c.type === type && c.model === model) ?? null)
 								: null;
 
 					if (!check) return sendJson(res, { error: 'Invalid check' }, 400);

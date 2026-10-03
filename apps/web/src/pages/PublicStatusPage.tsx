@@ -16,17 +16,19 @@ import { useEffect, useState } from 'react';
 import { fetchSummary, fetchTimeseries, type SummaryResponse, type TimeseriesResponse, type WindowKey } from '../api';
 import { WINDOWS } from '../constants';
 import { UptimeBar } from '../components/UptimeBar';
+import { EmptyState } from '../components/EmptyState';
+import WidgetsOutlined from '@mui/icons-material/WidgetsOutlined';
 
 function formatAgoShort(ts: number | null, nowMs = Date.now()) {
 	if (!ts) return '—';
 	const delta = Math.max(0, nowMs - ts);
-	if (delta < 60_000) return 'now';
+	if (delta < 60_000) return '刚刚';
 	const mins = Math.round(delta / 60_000);
-	if (mins < 60) return `${mins}m ago`;
+	if (mins < 60) return `${mins} 分钟前`;
 	const hours = Math.round(mins / 60);
-	if (hours < 48) return `${hours}h ago`;
+	if (hours < 48) return `${hours} 小时前`;
 	const days = Math.round(hours / 24);
-	return `${days}d ago`;
+	return `${days} 天前`;
 }
 
 function formatPercentShort(value: number | null): string {
@@ -86,7 +88,7 @@ export function PublicStatusPage() {
 		setSummaryError(null);
 		fetchSummary()
 			.then((s) => setSummary(s))
-			.catch((e) => setSummaryError(e?.message || String(e)))
+			.catch(() => setSummaryError('状态暂时无法加载，请稍后重试。'))
 			.finally(() => setLoading(false));
 	}, []);
 
@@ -114,7 +116,7 @@ export function PublicStatusPage() {
 					else anyFailed = true;
 				}
 				setTimelineByCheckId(map);
-				if (anyFailed) setTimelineError('部分检查项趋势数据加载失败（可刷新重试）');
+				if (anyFailed) setTimelineError('部分趋势暂时无法加载，请稍后重试。');
 			})
 			.finally(() => {
 				if (!cancelled) setTimelineLoading(false);
@@ -127,31 +129,28 @@ export function PublicStatusPage() {
 
 	return (
 		<Stack spacing={3}>
-			<Box>
-				<Typography variant="h4" gutterBottom>
-					状态总览
-				</Typography>
+			<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2.5} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+				<Box>
+					<Typography component="h1" variant="h4">
+						状态总览
+					</Typography>
+				</Box>
 				<Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
 					<Stack direction="row" spacing={1} alignItems="center">
 						{timelineLoading ? <CircularProgress size={18} /> : null}
 						<FormControl size="small" sx={{ minWidth: 180 }} disabled={timelineLoading}>
-						<InputLabel id="window-label">时间窗口</InputLabel>
-						<Select
-							labelId="window-label"
-							label="时间窗口"
-							value={windowKey}
-							onChange={(e) => setWindowKey(e.target.value as WindowKey)}
-						>
-							{WINDOWS.map((w) => (
-								<MenuItem value={w.key} key={w.key}>
-									{w.label}
-								</MenuItem>
-							))}
-						</Select>
-					</FormControl>
+							<InputLabel id="window-label">显示范围</InputLabel>
+							<Select labelId="window-label" label="显示范围" value={windowKey} onChange={(e) => setWindowKey(e.target.value as WindowKey)}>
+								{WINDOWS.map((w) => (
+									<MenuItem value={w.key} key={w.key}>
+										{w.label}
+									</MenuItem>
+								))}
+							</Select>
+						</FormControl>
 					</Stack>
 				</Box>
-			</Box>
+			</Stack>
 
 			{summaryError ? <Alert severity="error">{summaryError}</Alert> : null}
 			{loading ? (
@@ -165,22 +164,19 @@ export function PublicStatusPage() {
 			{summary ? (
 				<Stack spacing={3}>
 					<Box>
-						<Typography variant="h5" gutterBottom>
+						<Typography component="h2" variant="h5" sx={{ mb: 2 }}>
 							整体状态
 						</Typography>
-						<Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+						<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 							<Stack spacing={2} divider={<Divider flexItem />}>
 								{summary.checks
 									.filter((c) => c.type === 'head')
 									.map((c) => {
 										const ts = timelineByCheckId[c.id] ?? null;
 										const now = Date.now();
-										const lastDataTs =
-											(ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
+										const lastDataTs = (ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
 										const badgeAvailability =
-											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ??
-											c.stats[windowKey]?.availability ??
-											null;
+											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ?? c.stats[windowKey]?.availability ?? null;
 										const badgeColor = !c.enabled
 											? 'default'
 											: c.last_status === 'success'
@@ -192,29 +188,30 @@ export function PublicStatusPage() {
 										return (
 											<Stack key={c.id} spacing={1.25} sx={{ py: 0.5 }}>
 												<Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
-													<Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 300 }}>
-														<Chip label={formatPercentShort(badgeAvailability)} color={badgeColor as any} size="small" sx={{ minWidth: 90, fontWeight: 700 }} />
-														<Box>
-															<Stack direction="row" spacing={1} alignItems="center">
-																<Typography variant="subtitle1" fontWeight={700}>
+													<Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0, width: { md: '48%' }, flexShrink: 0 }}>
+														<Chip
+															label={formatPercentShort(badgeAvailability)}
+															color={badgeColor as any}
+															size="small"
+															sx={{ minWidth: 90, fontWeight: 700 }}
+														/>
+														<Box sx={{ minWidth: 0 }}>
+															<Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
+																<Typography variant="subtitle1" fontWeight={600} sx={{ overflowWrap: 'anywhere' }}>
 																	{checkTitle(c)}
 																</Typography>
 																<Chip
 																	size="small"
 																	variant="outlined"
-																	label={c.enabled ? 'Enabled' : 'Disabled'}
+																	label={c.enabled ? '已启用' : '已停用'}
 																	color={c.enabled ? ('success' as any) : ('default' as any)}
 																/>
 															</Stack>
 														</Box>
 													</Stack>
 
-													<Box sx={{ flexGrow: 1, minWidth: 260 }}>
-														<UptimeBar
-															loading={timelineLoading}
-															placeholderCount={placeholderCountForWindow(windowKey)}
-															timeseries={ts}
-														/>
+													<Box sx={{ flexGrow: 1, minWidth: 0 }}>
+														<UptimeBar loading={timelineLoading} placeholderCount={placeholderCountForWindow(windowKey)} timeseries={ts} />
 														<Stack direction="row" justifyContent="space-between">
 															<Typography variant="caption" color="text.secondary">
 																{timelineLoading ? '…' : ts ? formatAgoShort(ts.from, now) : '—'}
@@ -233,23 +230,23 @@ export function PublicStatusPage() {
 					</Box>
 
 					<Box>
-						<Typography variant="h5" gutterBottom>
+						<Typography component="h2" variant="h5" sx={{ mb: 2 }}>
 							模型可用性
 						</Typography>
-						<Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
+						<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 							<Stack spacing={2} divider={<Divider flexItem />}>
-										{summary.checks
+								{!summary.checks.some((c) => c.type === 'model' || c.type === 'rerank') && (
+									<EmptyState icon={<WidgetsOutlined />} title="暂无模型监测数据" />
+								)}
+								{summary.checks
 									.filter((c) => c.type === 'model' || c.type === 'rerank')
 									.sort((a, b) => String(a.model).localeCompare(String(b.model)))
 									.map((c) => {
 										const ts = timelineByCheckId[c.id] ?? null;
 										const now = Date.now();
-										const lastDataTs =
-											(ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
+										const lastDataTs = (ts?.series ?? []).filter((p) => (p.total_count ?? 0) > 0).at(-1)?.ts ?? null;
 										const badgeAvailability =
-											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ??
-											c.stats[windowKey]?.availability ??
-											null;
+											(!timelineLoading ? availabilityFromTimeseries(ts, windowKey) : null) ?? c.stats[windowKey]?.availability ?? null;
 										const badgeColor = !c.enabled
 											? 'default'
 											: c.last_status === 'success'
@@ -261,34 +258,35 @@ export function PublicStatusPage() {
 										return (
 											<Stack key={c.id} spacing={1.25} sx={{ py: 0.5 }}>
 												<Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ md: 'center' }}>
-													<Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 300 }}>
-														<Chip label={formatPercentShort(badgeAvailability)} color={badgeColor as any} size="small" sx={{ minWidth: 90, fontWeight: 700 }} />
-														<Box>
-															<Stack direction="row" spacing={1} alignItems="center">
-																<Typography variant="subtitle1" fontWeight={700}>
+													<Stack direction="row" spacing={2} alignItems="center" sx={{ minWidth: 0, width: { md: '48%' }, flexShrink: 0 }}>
+														<Chip
+															label={formatPercentShort(badgeAvailability)}
+															color={badgeColor as any}
+															size="small"
+															sx={{ minWidth: 90, fontWeight: 700 }}
+														/>
+														<Box sx={{ minWidth: 0 }}>
+															<Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
+																<Typography variant="subtitle1" fontWeight={600} sx={{ width: '100%', overflowWrap: 'anywhere' }}>
 																	{checkTitle(c)}
 																</Typography>
 																{c.type === 'rerank' ? (
-																	<Chip size="small" variant="outlined" label="Rerank" />
+																	<Chip size="small" variant="outlined" label="Reranker" />
 																) : (
 																	<Chip size="small" variant="outlined" label="Embedding" />
 																)}
 																<Chip
 																	size="small"
 																	variant="outlined"
-																	label={c.enabled ? 'Enabled' : 'Disabled'}
+																	label={c.enabled ? '已启用' : '已停用'}
 																	color={c.enabled ? ('success' as any) : ('default' as any)}
 																/>
 															</Stack>
 														</Box>
 													</Stack>
 
-													<Box sx={{ flexGrow: 1, minWidth: 260, opacity: c.enabled ? 1 : 0.55 }}>
-														<UptimeBar
-															loading={timelineLoading}
-															placeholderCount={placeholderCountForWindow(windowKey)}
-															timeseries={ts}
-														/>
+													<Box sx={{ flexGrow: 1, minWidth: 0, opacity: c.enabled ? 1 : 0.55 }}>
+														<UptimeBar loading={timelineLoading} placeholderCount={placeholderCountForWindow(windowKey)} timeseries={ts} />
 														<Stack direction="row" justifyContent="space-between">
 															<Typography variant="caption" color="text.secondary">
 																{timelineLoading ? '…' : ts ? formatAgoShort(ts.from, now) : '—'}
@@ -307,7 +305,6 @@ export function PublicStatusPage() {
 					</Box>
 				</Stack>
 			) : null}
-
 		</Stack>
 	);
 }

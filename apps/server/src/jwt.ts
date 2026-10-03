@@ -23,13 +23,7 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 async function hmacSha256Base64Url(secret: string, message: string): Promise<string> {
-	const key = await crypto.subtle.importKey(
-		'raw',
-		new TextEncoder().encode(secret),
-		{ name: 'HMAC', hash: 'SHA-256' },
-		false,
-		['sign'],
-	);
+	const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 	const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
 	return base64UrlEncode(sig);
 }
@@ -78,4 +72,3 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtPaylo
 	if ((payload as any).exp <= nowSeconds) return null;
 	return payload as JwtPayload;
 }
-

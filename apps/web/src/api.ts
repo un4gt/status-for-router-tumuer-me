@@ -109,7 +109,34 @@ export async function adminLogout() {
 
 export async function adminRun() {
 	const resp = await apiFetch('/api/admin/run', { method: 'POST', credentials: 'include' });
-	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+	if (!resp.ok)
+		throw Object.assign(new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`), { status: resp.status });
+	return resp.json();
+}
+
+export type ModelType = 'model' | 'rerank';
+export type ModelCandidate = {
+	id: string;
+	detected_type: ModelType | null;
+	suggested_type: ModelType | null;
+	unsupported: boolean;
+};
+
+export async function adminModels(): Promise<{ models: ModelCandidate[] }> {
+	const resp = await apiFetch('/api/admin/models', { credentials: 'include' });
+	if (!resp.ok)
+		throw Object.assign(new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`), { status: resp.status });
+	return resp.json();
+}
+
+export async function adminSaveSelection(checks: Array<{ model: string; type: ModelType }>) {
+	const resp = await apiFetch('/api/admin/checks/selection', {
+		method: 'PUT',
+		credentials: 'include',
+		body: JSON.stringify({ checks }),
+	});
+	if (!resp.ok)
+		throw Object.assign(new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`), { status: resp.status });
 	return resp.json();
 }
 

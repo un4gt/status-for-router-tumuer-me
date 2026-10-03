@@ -10,9 +10,7 @@ function bucketRange(from: number, to: number, step: number) {
 }
 
 function formatDateTimeShort(ts: number) {
-	return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', month: '2-digit', day: '2-digit' }).format(
-		new Date(ts),
-	);
+	return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', month: '2-digit', day: '2-digit' }).format(new Date(ts));
 }
 
 export type UptimeBarProps = {
@@ -55,6 +53,7 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 							bgcolor: theme.palette.action.disabledBackground,
 							animation: 'barPulse 1.2s ease-in-out infinite',
 							animationDelay: `${(idx % 24) * 0.03}s`,
+							'@media (prefers-reduced-motion: reduce)': { animation: 'none' },
 						}}
 					/>
 				))}
@@ -95,10 +94,8 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 
 				const availabilityText = availability === null ? '—' : `${(availability * 100).toFixed(2)}%`;
 				const title = point
-					? `${formatDateTimeShort(ts)}  |  ${success}/${total}  |  ${availabilityText}${
-							avgLatency === null ? '' : `  |  ${avgLatency}ms`
-						}`
-					: `${formatDateTimeShort(ts)}  |  No data`;
+					? `${formatDateTimeShort(ts)}  |  ${success}/${total}  |  ${availabilityText}${avgLatency === null ? '' : `  |  ${avgLatency}ms`}`
+					: `${formatDateTimeShort(ts)}  |  暂无数据`;
 
 				return (
 					<Tooltip key={ts} title={title} arrow>

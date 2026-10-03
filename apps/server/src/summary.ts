@@ -1,4 +1,16 @@
-import type { Env } from './env';
+import type { Services } from './db';
+
+type StatsRow = {
+	check_id: string;
+	total_5h: number;
+	success_5h: number;
+	total_24h: number;
+	success_24h: number;
+	total_7d: number;
+	success_7d: number;
+	total_30d: number;
+	success_30d: number;
+};
 import { getLastResultForCheck, listChecks } from './db';
 
 export type WindowKey = '5h' | '24h' | '7d' | '30d';
@@ -22,18 +34,19 @@ export function getWindowStarts(nowMs = Date.now()) {
 	};
 }
 
-export async function getSummary(env: Env) {
-	const { nowMs, starts } = getWindowStarts();
+export function getSummary(services: Services, now = Date.now()) {
+	const { nowMs, starts } = getWindowStarts(now);
 
-	const checks = await listChecks(env);
+	const checks = listChecks(services);
 	const checkIds = checks.map((c) => c.id);
 	if (checkIds.length === 0) {
 		return { generated_at: nowMs, checks: [] as any[] };
 	}
 
 	const oldest = starts['30d'];
-	const statsRes = await env.DB.prepare(
-		`SELECT
+	const statsRes = services.db
+		.query<StatsRow, number[]>(
+			`SELECT
        check_id,
        SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS total_5h,
        SUM(CASE WHEN ts >= ? THEN success ELSE 0 END) AS success_5h,
@@ -46,32 +59,11 @@ export async function getSummary(env: Env) {
      FROM results
      WHERE ts >= ?
      GROUP BY check_id`,
-	)
-		.bind(
-			starts['5h'],
-			starts['5h'],
-			starts['24h'],
-			starts['24h'],
-			starts['7d'],
-			starts['7d'],
-			starts['30d'],
-			starts['30d'],
-			oldest,
 		)
-		.all<{
-			check_id: string;
-			total_5h: number;
-			success_5h: number;
-			total_24h: number;
-			success_24h: number;
-			total_7d: number;
-			success_7d: number;
-			total_30d: number;
-			success_30d: number;
-		}>();
+		.all(starts['5h'], starts['5h'], starts['24h'], starts['24h'], starts['7d'], starts['7d'], starts['30d'], starts['30d'], oldest);
 
 	const statsById = new Map<string, any>();
-	for (const row of statsRes.results ?? []) statsById.set(row.check_id, row);
+	for (const row of statsRes) statsById.set(row.check_id, row);
 
 	const out = [];
 	for (const check of checks) {
@@ -86,7 +78,7 @@ export async function getSummary(env: Env) {
 			success_30d: 0,
 		};
 
-		const last = await getLastResultForCheck(env, check.id);
+		const last = getLastResultForCheck(services, check.id);
 
 		const windowStats = {
 			'5h': {
@@ -126,4 +118,3 @@ export async function getSummary(env: Env) {
 
 	return { generated_at: nowMs, checks: out };
 }
-

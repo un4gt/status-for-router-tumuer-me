@@ -1,14 +1,9 @@
-import { CssBaseline, ThemeProvider, createTheme } from '@mui/material';
+import { CssBaseline, ThemeProvider } from '@mui/material';
 import { RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { PublicStatusPage } from './pages/PublicStatusPage';
 import { AdminPage } from './pages/AdminPage';
-
-const theme = createTheme({
-	palette: {
-		mode: 'light',
-	},
-});
+import { theme } from './theme';
 
 const router = createBrowserRouter([
 	{
@@ -29,4 +24,3 @@ export function App() {
 		</ThemeProvider>
 	);
 }
-
