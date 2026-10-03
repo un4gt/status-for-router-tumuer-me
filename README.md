@@ -10,28 +10,44 @@
 
 ## Docker 部署
 
-需要 Docker Compose 和服务器上已有的 Nginx。镜像固定使用 Bun `1.4.0`，构建时执行类型检查、测试和前端构建。
+需要 Docker Compose 和服务器上已有的 Nginx。`compose.yaml` 默认拉取 [tumuer/router-status:latest](https://hub.docker.com/r/tumuer/router-status)，Bun `1.4.0` 和前后端程序已包含在镜像中。当前发布的镜像架构为 `linux/amd64`，适用于 x86_64 服务器。
+
+在服务器的部署目录中放置 `compose.yaml` 和 `.env` 两个文件，按 [.env.example](.env.example) 填写管理员账号、密码、会话密钥和上游 API 密钥。数据写入同目录下的 `data/`。服务器无需项目源码、Dockerfile、Node.js 或 Bun。
 
 ```bash
-cp .env.example .env
-# 编辑 .env，填写账号、密码、会话密钥和上游 API 密钥
+# 在存放 compose.yaml 和已填写的 .env 的目录中执行
 chmod 600 .env
-# 容器使用 bun 用户（UID/GID 1000），目录需要可写
-sudo install -d -m 0750 -o 1000 -g 1000 data
-docker compose up -d --build
+docker compose pull app
+docker compose up -d app
 docker compose ps
 docker compose logs --tail 100 app
 ```
 
+如需固定版本，把 `compose.yaml` 的 `image` 改为 Docker Hub 上对应的 Git 提交号标签，再执行上述拉取和启动命令。
+
 应用端口只绑定宿主机 `127.0.0.1:8787`，数据库及 WAL 文件都保存在宿主机 `./data`。停止、重建或升级容器会保留数据。部署默认为单实例。
 
-参考 [Nginx 配置](deploy/nginx.conf.example)，替换域名和证书路径，接入已有 Nginx。整个站点代理到 `http://127.0.0.1:8787`，TLS 由 Nginx 终止；`/admin` 刷新不需要额外的静态文件配置。检查配置后重载 Nginx。
+容器启动脚本在数据目录挂载完成后，自动创建 `/app/data` 并将目录所有者设置为 `bun`（UID/GID 1000）、权限设置为 `0750`，随后切换到 `bun` 用户运行应用。首次部署无需手动创建或授权 `data` 目录。已有数据库文件不会被重建或递归修改权限；如果自行恢复备份，仍需确保数据库文件归 UID/GID 1000 所有。若通过 `user:` 指定非 root 用户启动容器，则跳过自动授权，使用挂载目录已有的权限。
 
-`GET /healthz` 检查进程及数据库连接，供 Docker 健康检查使用。探测失败属于被监控服务的状态，不会使容器健康检查失败。
+源站不配置证书时，使用 [纯 HTTP Nginx 配置](deploy/nginx-http.conf.example)：只监听 `80` 端口，直接代理整个站点到 `http://127.0.0.1:8787`，没有 `443`、证书配置或 HTTPS 跳转。首页、`/admin`、`/api` 和静态资源共用这一份反代配置。
+
+将文件中的 `status.example.com` 替换成实际域名，保存到 Nginx 已启用的配置目录，例如 `/etc/nginx/conf.d/router-status.conf`，然后检查并重载：
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+使用 Cloudflare 橙云代理且源站走 HTTP 时，将 Cloudflare 的 SSL/TLS 加密模式设为 **Flexible**：浏览器可以通过 HTTPS 访问 Cloudflare，Cloudflare 到源站使用 HTTP/80。如果浏览器到 Cloudflare 也只使用 HTTP，则设为 **Off**，并关闭 **Always Use HTTPS** 及适用于该站点的 HTTPS 重定向规则。
+
+Compose 已设置 `TRUST_PROXY=true`；直接运行 Bun 并接入 Nginx 时，在 `.env` 中设置 `TRUST_PROXY=true` 后重启后端。示例配置由 Nginx 覆盖转发头，应用端口继续只绑定本机。
+
+源站需要自行提供 HTTPS 时，可使用 [带证书的 Nginx 配置](deploy/nginx.conf.example)，替换域名和证书路径后启用。
+
+镜像内包含 curl，Compose 每 30 秒用它请求 `GET /healthz`，检查进程及数据库连接。探测失败属于被监控服务的状态，不会使容器健康检查失败。
 
 ## 配置
 
-根目录 `.env` 是统一服务端配置入口，本地由 Bun 加载，Docker 由 Compose 的 `env_file` 注入。真实 `.env` 和数据库不会进入 Git 或构建镜像。
+`.env` 是统一服务端配置入口：Docker 部署时与 `compose.yaml` 放在同一目录，由 Compose 的 `env_file` 注入；本地开发时放在项目根目录，由 Bun 加载。真实 `.env` 和数据库不会进入 Git 或构建镜像。
 
 | 变量 | 默认值 / 用途 |
 | --- | --- |
@@ -49,7 +65,7 @@ docker compose logs --tail 100 app
 生成会话密钥：
 
 ```bash
-bun -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+openssl rand -hex 32
 ```
 
 Compose 固定容器内 `HOST=0.0.0.0`、`PORT=8787`、`DATABASE_PATH=/app/data/status.sqlite`、`TRUST_PROXY=true`。修改其它 `.env` 配置后执行 `docker compose up -d --force-recreate app`，单纯 `restart` 不会重新注入环境变量。
@@ -106,7 +122,7 @@ bun run start
 使用 SQLite `VACUUM INTO` 生成包含已提交 WAL 数据的一致性备份，可以在运行期间执行；目标文件必须尚不存在。
 
 ```bash
-docker compose exec app bun run db:backup ./data/backups/status-2026-10-03.sqlite
+docker compose exec --user bun app bun run db:backup ./data/backups/status-2026-10-03.sqlite
 # 非容器环境
 bun run db:backup ./data/backups/status-2026-10-03.sqlite
 ```
@@ -115,7 +131,14 @@ bun run db:backup ./data/backups/status-2026-10-03.sqlite
 
 恢复时先停止应用，将当前主数据库及同名 `-wal`、`-shm` 文件一并移到单独的留存目录，再把选定备份复制为 `data/status.sqlite`，确保 UID/GID 1000 可读写后启动。不要将旧 WAL/SHM 文件与恢复后的主文件混用。
 
-升级前先备份，然后执行 `docker compose up -d --build`。需要回滚数据库结构时，使用与旧镜像匹配的备份；应用会拒绝打开版本比自身迁移更新的数据库。
+升级前先备份，再拉取镜像并更新容器：
+
+```bash
+docker compose pull app
+docker compose up -d app
+```
+
+如果使用固定版本标签，先修改 `compose.yaml` 中的 `image`。需要回滚数据库结构时，使用与旧镜像匹配的备份；应用会拒绝打开版本比自身迁移更新的数据库。
 
 本次从空库开始，不导入旧平台历史。新站登录、同步、探测和页面验证成功后，再停用旧站定时任务并切换站点流量；旧服务资源不由本项目自动删除。
 
