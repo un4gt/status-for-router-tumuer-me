@@ -119,8 +119,6 @@ async function modelRerankCheck(
 				documents: RERANK_DOCUMENTS,
 				top_n: Math.min(4, RERANK_DOCUMENTS.length),
 				return_documents: true,
-				max_chunks_per_doc: 1024,
-				overlap_tokens: 80,
 			}),
 			signal: controller.signal,
 		});
