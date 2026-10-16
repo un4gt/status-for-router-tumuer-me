@@ -165,3 +165,19 @@ docker compose up -d app
 - `PUT /api/admin/checks/selection`：`{ checks: [{ model, type }] }`，完整替换启用集合，保留未选中项的历史；空数组停用全部模型项
 
 内部 `type=model` 表示 embedding，`type=rerank` 表示 reranker。候选的识别/建议类型可为 `null`，保存时必须显式指定类型。上游鉴权错误返回 `502`，超时返回 `504`，未配置上游密钥返回 `503`，不会使本站管理员退出登录。
+
+
+## 公共模型名称协调迁移
+
+网关改为作者/模型名时，停止状态站进程和调度器，使用网关审阅过的 `deploy/public-models-20261017.json`（仅名字映射，不含密钥）：
+
+```sh
+bun apps/server/src/public-model-cutover.ts preview data/status.sqlite public-models-20261017.json
+bun apps/server/src/public-model-cutover.ts apply data/status.sqlite public-models-20261017.json backups/before-public-models.sqlite
+# 需要回退时，先停止进程：
+bun apps/server/src/public-model-cutover.ts rollback data/status.sqlite
+```
+
+apply 必须提供不存在的备份路径，先 VACUUM INTO，再用一个 SQLite 事务改名/合并。所有历史结果保留，不按时间去重；已有目标探针保持原启停，新目标仅在原来源至少一个启用时启用。不合并不同网关地址。原检查与结果来源记录在数据库迁移日志中。
+
+回退恢复旧检查及每条旧结果的来源，迁移后产生的结果保留其实际新身份；若新身份原来不存在，该探针回退后停用。配置被编辑后拒绝自动回退。不要恢复整库丢失切换后的结果。此工具不在启动时自动执行，本轮仅本地实现，未部署。
