@@ -14,6 +14,12 @@ describe('model discovery and probes', () => {
 		expect(classifyModel({ id: 'conflict', type: 'embedding', task: 'rerank' }).detected_type).toBeNull();
 		expect(classifyModel({ id: 'chat', type: 'chat' }).unsupported).toBe(true);
 		expect(classifyModel({ id: 'multi', supported_endpoints: ['/v1/embeddings', '/v1/chat/completions'] }).detected_type).toBe('model');
+		expect(classifyModel({ id: 'typesafe/jev-1.14.0', supported_endpoints: ['/v1/decisions'] }).detected_type).toBe('decisions');
+		expect(classifyModel({ id: 'typesafe/jev-1.14.0', supported_endpoints: ['/v1/systemone'] }).detected_type).toBe('systemone');
+		expect(classifyModel({ id: 'typesafe/jev-1.14.0' }).suggested_type).toBe('decisions');
+		expect(
+			classifyModel({ id: 'ambiguous', supported_endpoints: ['/v1/decisions', '/v1/systemone'] }).detected_type,
+		).toBeNull();
 	});
 	test('fetches models with the configured key, without issuing inference requests', async () => {
 		const requests: string[] = [];
@@ -135,5 +141,62 @@ describe('model discovery and probes', () => {
 		release();
 		await run;
 		expect(services.db.query('SELECT * FROM results WHERE check_id=?').all('model:deleted')).toEqual([]);
+	});
+	test('probes systemone and decisions with a minimal payload and validates answers', async () => {
+		const requests: Array<{ path: string; body: any }> = [];
+		const server = Bun.serve({
+			hostname: '127.0.0.1',
+			port: 0,
+			async fetch(request) {
+				if (request.method === 'HEAD') return new Response(null);
+				const body = await request.json();
+				requests.push({ path: new URL(request.url).pathname, body });
+				return Response.json({ answers: { probe: { type: 'noul', noul: 0.91 } } });
+			},
+		});
+		onCleanup(() => server.stop(true));
+		const services = fixture({ headCheckUrl: String(server.url), routerBaseUrl: `${server.url}v1` });
+		saveSelection(services, [
+			{ model: 'typesafe/jev-latest', type: 'decisions' },
+			{ model: 'typesafe/jev-latest', type: 'systemone' },
+		]);
+		await runAllChecks(services);
+		expect(requests.map((request) => request.path).sort()).toEqual(['/v1/decisions', '/v1/systemone']);
+		for (const request of requests) {
+			expect(request.body).toMatchObject({
+				model: 'typesafe/jev-latest',
+				questions: { probe: { type: 'noul' } },
+			});
+			expect(Object.keys(request.body).sort()).toEqual(['model', 'questions', 'state']);
+		}
+		const rows = services.db
+			.query<{ check_id: string; success: number; error: string | null }, []>(
+				"SELECT check_id, success, error FROM results WHERE check_id LIKE 'decisions:%' OR check_id LIKE 'systemone:%' ORDER BY check_id",
+			)
+			.all();
+		expect(rows).toEqual([
+			{ check_id: 'decisions:typesafe/jev-latest', success: 1, error: null },
+			{ check_id: 'systemone:typesafe/jev-latest', success: 1, error: null },
+		]);
+	});
+	test('marks malformed decision answers as failures', async () => {
+		const server = Bun.serve({
+			hostname: '127.0.0.1',
+			port: 0,
+			async fetch(request) {
+				if (request.method === 'HEAD') return new Response(null);
+				return Response.json({ answers: { probe: { type: 'noul' } } });
+			},
+		});
+		onCleanup(() => server.stop(true));
+		const services = fixture({ headCheckUrl: String(server.url), routerBaseUrl: `${server.url}v1` });
+		saveSelection(services, [{ model: 'broken', type: 'decisions' }]);
+		await runAllChecks(services);
+		expect(services.db.query('SELECT success, error FROM results WHERE check_id=?').get('decisions:broken')).toMatchObject({
+			success: 0,
+		});
+		expect(String((services.db.query('SELECT error FROM results WHERE check_id=?').get('decisions:broken') as any).error)).toContain(
+			'Invalid decision response',
+		);
 	});
 });

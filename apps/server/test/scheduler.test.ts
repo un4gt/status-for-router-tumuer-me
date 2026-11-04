@@ -4,7 +4,7 @@ import { fixture } from './helpers';
 
 describe('scheduler', () => {
 	test('aligns five-minute runs to the clock across restarts and manual checks', async () => {
-		const services = fixture({ checkIntervalSeconds: 300 });
+		const services = fixture({ checkIntervalSeconds: 300, schedulerTickSeconds: 300 });
 		let clock = Date.parse('2026-10-03T22:59:04+08:00');
 		let release!: () => void;
 		let runs = 0;
@@ -40,7 +40,7 @@ describe('scheduler', () => {
 		expect(restarted.run('scheduled')).toBeNull();
 	});
 	test('sets timers for exact boundaries and corrects timer drift', async () => {
-		const services = fixture({ checkIntervalSeconds: 300 });
+		const services = fixture({ checkIntervalSeconds: 300, schedulerTickSeconds: 300 });
 		let clock = Date.parse('2026-10-03T22:59:04+08:00');
 		const runs: number[] = [];
 		const callbacks: Array<() => void> = [];

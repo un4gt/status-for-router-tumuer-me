@@ -33,11 +33,21 @@ export function getTimeseries(
 	checkId: string,
 	window: TimeseriesWindow,
 	nowMs = Date.now(),
-	opts?: { bucketMs?: number },
+	opts?: { bucketMs?: number; regionId?: string; source?: string },
 ) {
 	const bucketMs = opts?.bucketMs ?? getBucketMs(window);
 	const from = getFromTs(window, nowMs);
 	const to = nowMs;
+	const conditions = ['check_id = ?', 'ts >= ?', 'ts <= ?'];
+	const params: Array<string | number> = [checkId, from, to];
+	if (opts?.regionId !== undefined) {
+		conditions.push('region_id = ?');
+		params.push(opts.regionId);
+	}
+	if (opts?.source !== undefined) {
+		conditions.push('source = ?');
+		params.push(opts.source);
+	}
 
 	const res = services.db
 		.query<BucketRow, (string | number)[]>(
@@ -47,11 +57,11 @@ export function getTimeseries(
        SUM(success) AS success_count,
        AVG(latency_ms) AS avg_latency_ms
      FROM results
-     WHERE check_id = ? AND ts >= ? AND ts <= ?
+     WHERE ${conditions.join(' AND ')}
      GROUP BY bucket_ts
      ORDER BY bucket_ts ASC`,
 		)
-		.all(bucketMs, bucketMs, checkId, from, to);
+		.all(bucketMs, bucketMs, ...params);
 
 	const series = res.map((r) => {
 		const total = Number(r.total_count ?? 0);

@@ -28,6 +28,7 @@ import DoneRounded from '@mui/icons-material/DoneRounded';
 import { EmptyState } from './EmptyState';
 import { SectionHeader } from './SectionHeader';
 import { getUserError } from '../messages';
+import { TYPE_LABELS } from '../constants';
 import {
 	adminChecks,
 	adminModels,
@@ -237,7 +238,7 @@ export function ModelSelector({
 															variant="outlined"
 															label={
 																row.candidate?.suggested_type
-																	? `建议 ${row.candidate.suggested_type === 'model' ? 'Embedding' : 'Reranker'}，待确认`
+																	? `建议 ${TYPE_LABELS[row.candidate.suggested_type]}，待确认`
 																	: '类型待确认'
 															}
 														/>
@@ -264,6 +265,8 @@ export function ModelSelector({
 													</MenuItem>
 													<MenuItem value="model">Embedding</MenuItem>
 													<MenuItem value="rerank">Reranker</MenuItem>
+													<MenuItem value="decisions">Decisions</MenuItem>
+													<MenuItem value="systemone">System One</MenuItem>
 												</Select>
 											</TableCell>
 										</TableRow>

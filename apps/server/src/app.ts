@@ -18,11 +18,55 @@ import { discoverModels, ModelSyncError } from './models';
 import { createRateLimiter } from './rateLimit';
 import { RunBusyError, type Scheduler } from './scheduler';
 import { signJwt, verifyJwt } from './jwt';
-import { getSummary } from './summary';
-import { getBucketMs, getTimeseries, type TimeseriesWindow } from './timeseries';
+import { getSummary, type WindowKey } from './summary';
+import { getBucketMs, getTimeseries } from './timeseries';
+import { getOverview, getSources } from './overview';
 
 const SESSION_COOKIE = 'router_status_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const MODEL_TYPES = ['model', 'rerank', 'systemone', 'decisions'] as const;
+const WINDOWS = ['5h', '24h', '7d', '30d'] as const;
+
+function isModelType(value: unknown): value is (typeof MODEL_TYPES)[number] {
+	return typeof value === 'string' && (MODEL_TYPES as readonly string[]).includes(value);
+}
+
+function resolveCheckId(services: Services, c: any): { id?: string; error?: string } {
+	const explicit = c.req.query('check_id')?.trim();
+	if (explicit) {
+		const check = getCheckById(services, explicit);
+		return check ? { id: check.id } : { error: 'Unknown check_id' };
+	}
+	const type = c.req.query('type');
+	const model = c.req.query('model')?.trim();
+	if (type === 'head') return { id: 'net:root' };
+	if (!isModelType(type)) return { error: 'Invalid type' };
+	if (!model) return { error: 'Missing model' };
+	return { id: `${type}:${model}` };
+}
+
+function resolveRegion(services: Services, c: any): { regionId?: string; error?: string } {
+	const raw = c.req.query('region');
+	if (!raw || raw === 'all') return {};
+	const region = services.config.regions.find((item) => item.id === raw);
+	return region ? { regionId: region.id } : { error: 'Invalid region' };
+}
+
+function mockModelCandidates(services: Services) {
+	const candidates = new Map<
+		string,
+		{ id: string; detected_type: 'model' | 'rerank' | 'systemone' | 'decisions' | null; suggested_type: 'model' | 'rerank' | 'systemone' | 'decisions' | null; unsupported: boolean }
+	>();
+	for (const check of listChecks(services)) {
+		if (check.model && isModelType(check.type)) {
+			candidates.set(check.model, { id: check.model, detected_type: check.type, suggested_type: null, unsupported: false });
+		}
+	}
+	candidates.set('custom-embedding', { id: 'custom-embedding', detected_type: null, suggested_type: 'model', unsupported: false });
+	candidates.set('custom-decision', { id: 'custom-decision', detected_type: null, suggested_type: 'decisions', unsupported: false });
+	candidates.set('chat-model', { id: 'chat-model', detected_type: null, suggested_type: null, unsupported: true });
+	return [...candidates.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
 
 export function createApp(
 	services: Services,
@@ -62,16 +106,26 @@ export function createApp(
 	});
 
 	app.get('/api/public/summary', (c) => c.json(getSummary(services)));
+	app.get('/api/public/overview', (c) => {
+		const window = (c.req.query('window') || '24h') as WindowKey;
+		if (!(WINDOWS as readonly string[]).includes(window)) return c.json({ error: 'Invalid window' }, 400);
+		return c.json(getOverview(services, window));
+	});
 	app.get('/api/public/timeseries', (c) => {
-		const type = c.req.query('type');
-		const model = c.req.query('model');
-		const window = (c.req.query('window') || '24h') as TimeseriesWindow;
-		if (!['5h', '24h', '7d', '30d'].includes(window)) return c.json({ error: 'Invalid window' }, 400);
-		if (!['head', 'model', 'rerank'].includes(type || '')) return c.json({ error: 'Invalid type' }, 400);
-		if (type !== 'head' && !model) return c.json({ error: 'Missing model' }, 400);
-		const checkId = type === 'head' ? 'head:router' : `${type}:${model}`;
-		const bucketMs = getBucketMs(window, { minBucketMs: config.checkIntervalSeconds * 1000 });
-		return c.json({ check_id: checkId, ...getTimeseries(services, checkId, window, Date.now(), { bucketMs }) });
+		const window = (c.req.query('window') || '24h') as WindowKey;
+		if (!(WINDOWS as readonly string[]).includes(window)) return c.json({ error: 'Invalid window' }, 400);
+		const resolved = resolveCheckId(services, c);
+		if (resolved.error) return c.json({ error: resolved.error }, 400);
+		const region = resolveRegion(services, c);
+		if (region.error) return c.json({ error: region.error }, 400);
+		const check = resolved.id ? getCheckById(services, resolved.id) : null;
+		const minSeconds = check?.type === 'head' ? config.globalping.intervalSeconds : config.cloudProbe.intervalSeconds;
+		const bucketMs = getBucketMs(window, { minBucketMs: minSeconds * 1000 });
+		return c.json({
+			check_id: resolved.id,
+			region: region.regionId ?? 'all',
+			...getTimeseries(services, resolved.id!, window, Date.now(), { bucketMs, regionId: region.regionId }),
+		});
 	});
 
 	app.post('/api/admin/login', async (c) => {
@@ -99,22 +153,49 @@ export function createApp(
 			throw error;
 		}
 	});
-	app.get('/api/admin/results', (c) => {
-		const type = c.req.query('type');
-		const model = c.req.query('model');
-		if (!['head', 'model', 'rerank'].includes(type || '')) return c.json({ error: 'Invalid type' }, 400);
-		if (type !== 'head' && !model) return c.json({ error: 'Missing model' }, 400);
-		const checkId = type === 'head' ? 'head:router' : `${type}:${model}`;
-		const limit = Math.min(Math.max(Number.parseInt(c.req.query('limit') || '100', 10) || 100, 1), 500);
-		const results = db
-			.query<ResultRow, [string, number]>('SELECT * FROM results WHERE check_id=? ORDER BY ts DESC LIMIT ?')
-			.all(checkId, limit);
-		return c.json({ check_id: checkId, results });
+	app.post('/api/admin/sources/sync', async (c) => {
+		try {
+			return c.json(await scheduler.run('manual'));
+		} catch (error) {
+			if (error instanceof RunBusyError) return c.json({ error: error.message }, 409);
+			throw error;
+		}
 	});
-	app.get('/api/admin/checks', (c) => c.json({ checks: listChecks(services).map((row) => ({ ...row, enabled: row.enabled === 1 })) }));
+	app.get('/api/admin/sources', (c) => {
+		return c.json({
+			mode: config.monitoringMode,
+			regions: config.regions,
+			sources: getSources(services),
+		});
+	});
+	app.get('/api/admin/results', (c) => {
+		const resolved = resolveCheckId(services, c);
+		if (resolved.error) return c.json({ error: resolved.error }, 400);
+		const region = resolveRegion(services, c);
+		if (region.error) return c.json({ error: region.error }, 400);
+		const limit = Math.min(Math.max(Number.parseInt(c.req.query('limit') || '100', 10) || 100, 1), 500);
+		const conditions = ['check_id=?'];
+		const params: Array<string | number> = [resolved.id!];
+		if (region.regionId !== undefined) {
+			conditions.push('region_id=?');
+			params.push(region.regionId);
+		}
+		params.push(limit);
+		const results = db
+			.query<ResultRow, (string | number)[]>(
+				`SELECT * FROM results WHERE ${conditions.join(' AND ')} ORDER BY ts DESC LIMIT ?`,
+			)
+			.all(...params);
+		return c.json({ check_id: resolved.id, region: region.regionId ?? 'all', results });
+	});
+	app.get('/api/admin/checks', (c) =>
+		c.json({
+			checks: listChecks(services).map(({ external_id: _externalId, ...row }) => ({ ...row, enabled: row.enabled === 1 })),
+		}),
+	);
 	app.post('/api/admin/checks', async (c) => {
 		const body = await c.req.json().catch(() => null);
-		if (!body || !['model', 'rerank'].includes(body.type)) return c.json({ error: 'Only model/rerank checks can be created' }, 400);
+		if (!body || !isModelType(body.type)) return c.json({ error: 'Only model checks can be created' }, 400);
 		const model = typeof body.model === 'string' ? body.model.trim() : '';
 		if (!model || model.length > 200) return c.json({ error: 'Model must contain 1–200 characters' }, 400);
 		const id = `${body.type}:${model}`;
@@ -125,10 +206,13 @@ export function createApp(
 	app.patch('/api/admin/checks', async (c) => {
 		const body = await c.req.json().catch(() => null);
 		const id = typeof body?.id === 'string' ? body.id.trim() : '';
-		if (!id || typeof body?.enabled !== 'boolean') return c.json({ error: 'Missing id or enabled' }, 400);
+		if (!id) return c.json({ error: 'Missing id' }, 400);
 		const check = getCheckById(services, id);
 		if (!check) return c.json({ error: 'Not found' }, 404);
-		if (check.type === 'head') return c.json({ error: 'Only model/rerank checks can be modified' }, 400);
+		if (!isModelType(check.type)) return c.json({ error: 'Only model checks can be modified' }, 400);
+
+		const hasEnabled = typeof body?.enabled === 'boolean';
+		if (!hasEnabled) return c.json({ error: 'Missing enabled' }, 400);
 		setCheckEnabled(services, id, body.enabled);
 		return c.json({ ok: true });
 	});
@@ -138,11 +222,12 @@ export function createApp(
 		if (!id) return c.json({ error: 'Missing id' }, 400);
 		const check = getCheckById(services, id);
 		if (!check) return c.json({ error: 'Not found' }, 404);
-		if (check.type === 'head') return c.json({ error: 'Only model/rerank checks can be deleted' }, 400);
+		if (!isModelType(check.type)) return c.json({ error: 'Only model checks can be deleted' }, 400);
 		deleteCheck(services, id);
 		return c.json({ ok: true });
 	});
 	app.get('/api/admin/models', async (c) => {
+		if (config.monitoringMode === 'mock') return c.json({ models: mockModelCandidates(services) });
 		try {
 			return c.json({ models: await discover(config) });
 		} catch (error) {
@@ -157,12 +242,12 @@ export function createApp(
 		for (const row of body.checks) {
 			if (
 				!row ||
-				!['model', 'rerank'].includes(row.type) ||
+				!isModelType(row.type) ||
 				typeof row.model !== 'string' ||
 				!row.model.trim() ||
 				row.model.trim().length > 200
 			) {
-				return c.json({ error: 'Each model needs a valid name and an explicit model/rerank type' }, 400);
+				return c.json({ error: 'Each model needs a valid name and an explicit probe type' }, 400);
 			}
 			const model = row.model.trim();
 			checks.set(`${row.type}:${model}`, { model, type: row.type });

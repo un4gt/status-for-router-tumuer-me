@@ -17,6 +17,8 @@ export class ModelSyncError extends Error {
 
 const EMBEDDING_TYPES = new Set(['embedding', 'embeddings', 'text-embedding', 'feature-extraction', '/embeddings', '/v1/embeddings']);
 const RERANK_TYPES = new Set(['rerank', 'reranker', 'reranking', 'text-reranking', '/rerank', '/v1/rerank']);
+const SYSTEMONE_TYPES = new Set(['systemone', 'system-one', 'system one', '/systemone', '/v1/systemone']);
+const DECISION_TYPES = new Set(['decision', 'decisions', '/decision', '/v1/decision', '/decisions', '/v1/decisions']);
 const OTHER_TYPES = new Set([
 	'chat',
 	'chat-completion',
@@ -49,9 +51,23 @@ export function classifyModel(model: Record<string, unknown>): ModelCandidate {
 	);
 	const embedding = values.some((value) => EMBEDDING_TYPES.has(value));
 	const rerank = values.some((value) => RERANK_TYPES.has(value));
-	const detected_type = embedding !== rerank ? (embedding ? 'model' : 'rerank') : null;
-	const unsupported = !embedding && !rerank && values.some((value) => OTHER_TYPES.has(value));
-	const suggested_type = /rerank/i.test(id) ? 'rerank' : /embed|(?:^|\/)bge-m3$/i.test(id) ? 'model' : null;
+	const systemone = values.some((value) => SYSTEMONE_TYPES.has(value));
+	const decisions = values.some((value) => DECISION_TYPES.has(value));
+	const matches = [
+		embedding ? 'model' : null,
+		rerank ? 'rerank' : null,
+		systemone ? 'systemone' : null,
+		decisions ? 'decisions' : null,
+	].filter((type): type is ModelType => type !== null);
+	const detected_type = matches.length === 1 ? matches[0] : null;
+	const unsupported = matches.length === 0 && values.some((value) => OTHER_TYPES.has(value));
+	const suggested_type = /rerank/i.test(id)
+		? 'rerank'
+		: /(?:^|\/)bge-m3$/i.test(id) || /embed/i.test(id)
+			? 'model'
+			: /^typesafe\/jev(?:-|$)/i.test(id)
+				? 'decisions'
+				: null;
 	return { id, detected_type, suggested_type: unsupported ? null : suggested_type, unsupported };
 }
 

@@ -1,0 +1,14 @@
+{
+	"name": "emrank-status-probe",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Tencent Cloud SCF probe for emrank status page",
+	"main": "index.mjs",
+	"engines": {
+		"node": ">=20.19 <21"
+	},
+	"scripts": {
+		"test": "node --test test/index.test.mjs test/memory.test.mjs"
+	}
+}

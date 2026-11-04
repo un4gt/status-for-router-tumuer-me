@@ -6,6 +6,8 @@ const errorMessages = new Map([
 	['Not found', '该检查项已不存在，请刷新页面。'],
 	['Model must contain 1–200 characters', '模型名称需为 1–200 个字符。'],
 	['Each model needs a valid name and an explicit model/rerank type', '请填写模型名称并选择探测类型。'],
+	['Each model needs a valid name and an explicit probe type', '请填写模型名称并选择探测类型。'],
+	['Missing enabled', '请选择启用状态。'],
 	['A check run is already in progress', '已有探测正在进行，请稍后重试。'],
 ]);
 

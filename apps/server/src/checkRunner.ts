@@ -5,6 +5,10 @@ const EMBEDDING_INPUT = '这是一段需要转换成向量的文本';
 const MODEL_CONCURRENCY = 3;
 const RERANK_QUERY = 'Apple';
 const RERANK_DOCUMENTS = ['apple', 'banana', 'fruit', 'vegetable'];
+const DECISION_STATE = '商品包装有轻微划痕，内部完好';
+const DECISION_QUESTIONS = {
+	probe: { type: 'noul' as const, instructions: '商品是否完好？' },
+};
 
 function errorMessage(err: unknown): string {
 	const msg = (() => {
@@ -148,6 +152,62 @@ async function modelRerankCheck(
 	return { success, latencyMs: Math.round(performance.now() - start), error, statusCode };
 }
 
+async function modelDecisionCheck(
+	routerBaseUrl: string,
+	apiKey: string,
+	model: string,
+	path: '/systemone' | '/decisions',
+	timeoutMs: number,
+): Promise<{ success: 0 | 1; latencyMs: number; error: string | null; statusCode: number | null }> {
+	const start = performance.now();
+	let success: 0 | 1 = 0;
+	let error: string | null = null;
+	let statusCode: number | null = null;
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort('timeout'), timeoutMs);
+	try {
+		const base = routerBaseUrl.replace(/\/+$/, '');
+		const resp = await fetch(`${base}${path}`, {
+			method: 'POST',
+			headers: {
+				authorization: `Bearer ${apiKey}`,
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				model,
+				state: DECISION_STATE,
+				questions: DECISION_QUESTIONS,
+			}),
+			signal: controller.signal,
+		});
+
+		statusCode = resp.status;
+		if (!resp.ok) {
+			error = `HTTP ${resp.status}`;
+			return { success, latencyMs: Math.round(performance.now() - start), error, statusCode };
+		}
+
+		const json = (await resp.json().catch(() => null)) as any;
+		const answer = json?.answers?.probe;
+		success =
+			answer?.type === 'noul' &&
+			typeof answer.noul === 'number' &&
+			Number.isFinite(answer.noul) &&
+			answer.noul >= 0 &&
+			answer.noul <= 1
+				? 1
+				: 0;
+		if (!success) error = 'Invalid decision response: expected answers.probe.noul in [0, 1]';
+	} catch (err) {
+		error = errorMessage(err);
+	} finally {
+		clearTimeout(timeout);
+	}
+
+	return { success, latencyMs: Math.round(performance.now() - start), error, statusCode };
+}
+
 async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
 	let index = 0;
 	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
@@ -162,14 +222,18 @@ async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) =>
 	if (failure?.status === 'rejected') throw failure.reason;
 }
 
+/**
+ * Direct probes are kept for MONITORING_MODE=direct, unit tests, and mock seeding.
+ * Production uses collector.ts with Globalping (network) and cloud functions (business).
+ */
 export async function runAllChecks(services: Services, opts?: { triggeredBy: 'scheduled' | 'manual' }) {
 	const { headCheckUrl, routerBaseUrl } = services.config;
 
 	const checks = listChecks(services);
 	const enabled = checks.filter((c) => c.enabled === 1);
 
-	// HEAD check
-	const head = enabled.find((c) => c.id === 'head:router');
+	// HEAD check (new net:root id, with a fallback for legacy databases)
+	const head = enabled.find((c) => c.id === 'net:root') ?? enabled.find((c) => c.id === 'head:router');
 	if (head) {
 		const ts = Date.now();
 		const res = await headCheck(headCheckUrl, 15_000);
@@ -180,29 +244,33 @@ export async function runAllChecks(services: Services, opts?: { triggeredBy: 'sc
 			status_code: res.statusCode,
 			latency_ms: res.latencyMs,
 			error: safeError(res.error, services.config.apiKey),
+			source: 'direct',
 		});
 	}
 
 	// MODEL checks
 	const apiKey = services.config.apiKey;
+	const modelChecks = enabled.filter(
+		(c) => (c.type === 'model' || c.type === 'rerank' || c.type === 'systemone' || c.type === 'decisions') && c.model,
+	);
 	if (!apiKey) {
-		for (const check of enabled.filter((c) => (c.type === 'model' || c.type === 'rerank') && c.model)) {
-			const ts = Date.now();
+		for (const check of modelChecks) {
 			insertResult(services, {
 				check_id: check.id,
-				ts,
+				ts: Date.now(),
 				success: 0,
 				status_code: null,
 				latency_ms: null,
 				error: 'OPENAI_API_KEY not set',
+				source: 'direct',
 			});
 		}
 		return { ok: true, ts: Date.now(), triggeredBy: opts?.triggeredBy ?? 'manual' };
 	}
 
 	const client = new OpenAI({ apiKey, baseURL: routerBaseUrl, timeout: 15_000 });
-	const modelChecks = enabled.filter((c) => c.type === 'model' && c.model);
-	await mapWithConcurrency(modelChecks, MODEL_CONCURRENCY, async (check) => {
+	const embeddingChecks = modelChecks.filter((c) => c.type === 'model');
+	await mapWithConcurrency(embeddingChecks, MODEL_CONCURRENCY, async (check) => {
 		if (!getCheckById(services, check.id)?.enabled) return;
 		const ts = Date.now();
 		const res = await modelEmbeddingCheck(client, check.model!, 15_000);
@@ -213,10 +281,11 @@ export async function runAllChecks(services: Services, opts?: { triggeredBy: 'sc
 			status_code: res.statusCode,
 			latency_ms: res.latencyMs,
 			error: safeError(res.error, services.config.apiKey),
+			source: 'direct',
 		});
 	});
 
-	const rerankChecks = enabled.filter((c) => c.type === 'rerank' && c.model);
+	const rerankChecks = modelChecks.filter((c) => c.type === 'rerank');
 	await mapWithConcurrency(rerankChecks, MODEL_CONCURRENCY, async (check) => {
 		if (!getCheckById(services, check.id)?.enabled) return;
 		const ts = Date.now();
@@ -228,6 +297,24 @@ export async function runAllChecks(services: Services, opts?: { triggeredBy: 'sc
 			status_code: res.statusCode,
 			latency_ms: res.latencyMs,
 			error: safeError(res.error, services.config.apiKey),
+			source: 'direct',
+		});
+	});
+
+	const decisionChecks = modelChecks.filter((c) => c.type === 'systemone' || c.type === 'decisions');
+	await mapWithConcurrency(decisionChecks, MODEL_CONCURRENCY, async (check) => {
+		if (!getCheckById(services, check.id)?.enabled) return;
+		const ts = Date.now();
+		const path = check.type === 'systemone' ? '/systemone' : '/decisions';
+		const res = await modelDecisionCheck(routerBaseUrl, apiKey, check.model!, path, 15_000);
+		insertResult(services, {
+			check_id: check.id,
+			ts,
+			success: res.success,
+			status_code: res.statusCode,
+			latency_ms: res.latencyMs,
+			error: safeError(res.error, services.config.apiKey),
+			source: 'direct',
 		});
 	});
 

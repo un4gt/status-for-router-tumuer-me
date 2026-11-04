@@ -26,6 +26,7 @@ import {
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
+import CloudSyncOutlined from '@mui/icons-material/CloudSyncOutlined';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
@@ -34,6 +35,7 @@ import LoginRounded from '@mui/icons-material/LoginRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import PlaylistAddCheckRounded from '@mui/icons-material/PlaylistAddCheckRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
+import SyncRounded from '@mui/icons-material/SyncRounded';
 import { useEffect, useMemo, useState } from 'react';
 import {
 	adminChecks,
@@ -44,14 +46,26 @@ import {
 	adminResults,
 	adminRun,
 	adminSetCheckEnabled,
+	adminSources,
+	adminSyncSources,
+	type AdminSourcesResponse,
+	type ModelType,
 } from '../api';
-import { formatDateTime } from '../format';
+import { formatAgoShort, formatDateTime } from '../format';
+import { MODEL_TYPES, TYPE_LABELS } from '../constants';
 import { getUserError } from '../messages';
 import { ModelSelector } from '../components/ModelSelector';
 import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
 
-type Filter = { type: 'head' } | { type: 'model'; model: string } | { type: 'rerank'; model: string };
+type Filter = { type: 'head' } | { type: ModelType; model: string };
+
+const TYPE_STYLES: Record<string, { bgcolor: string; color: string }> = {
+	model: { bgcolor: 'primary.light', color: 'primary.main' },
+	rerank: { bgcolor: '#f7f2ff', color: '#8056b3' },
+	decisions: { bgcolor: '#eef8f2', color: '#19845e' },
+	systemone: { bgcolor: '#fff8e8', color: '#9a6b12' },
+};
 
 export function AdminPage() {
 	const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -62,6 +76,7 @@ export function AdminPage() {
 	const [running, setRunning] = useState(false);
 
 	const [filter, setFilter] = useState<Filter>({ type: 'head' });
+	const [regionFilter, setRegionFilter] = useState('all');
 	const [rows, setRows] = useState<any[]>([]);
 	const [rowsError, setRowsError] = useState<string | null>(null);
 	const [rowsLoading, setRowsLoading] = useState(false);
@@ -72,23 +87,16 @@ export function AdminPage() {
 	const [checksError, setChecksError] = useState<string | null>(null);
 	const [checksLoading, setChecksLoading] = useState(false);
 	const [newModel, setNewModel] = useState('');
-	const [newCheckType, setNewCheckType] = useState<'model' | 'rerank'>('model');
+	const [newCheckType, setNewCheckType] = useState<ModelType>('model');
 
-	const embeddingChecks = useMemo(() => {
-		return (checks || [])
-			.filter((c) => c.type === 'model' && c.model)
-			.sort((a: any, b: any) => String(a.model).localeCompare(String(b.model)));
-	}, [checks]);
+	const [sources, setSources] = useState<AdminSourcesResponse | null>(null);
+	const [sourcesError, setSourcesError] = useState<string | null>(null);
+	const [sourcesLoading, setSourcesLoading] = useState(false);
+	const [syncing, setSyncing] = useState(false);
 
-	const rerankChecks = useMemo(() => {
+	const modelChecks = useMemo(() => {
 		return (checks || [])
-			.filter((c) => c.type === 'rerank' && c.model)
-			.sort((a: any, b: any) => String(a.model).localeCompare(String(b.model)));
-	}, [checks]);
-
-	const modelLikeChecks = useMemo(() => {
-		return (checks || [])
-			.filter((c) => (c.type === 'model' || c.type === 'rerank') && c.model)
+			.filter((c) => MODEL_TYPES.includes(c.type) && c.model)
 			.sort((a: any, b: any) => {
 				const ta = String(a.type);
 				const tb = String(b.type);
@@ -97,10 +105,13 @@ export function AdminPage() {
 			});
 	}, [checks]);
 
+	const checksForType = (type: ModelType) => modelChecks.filter((c: any) => c.type === type);
+
 	const queryParams = useMemo(() => {
-		if (filter.type === 'head') return { type: 'head' as const };
-		return { type: filter.type as 'model' | 'rerank', model: filter.model };
-	}, [filter]);
+		const region = regionFilter === 'all' ? undefined : regionFilter;
+		if (filter.type === 'head') return { type: 'head' as const, region };
+		return { type: filter.type, model: filter.model, region };
+	}, [filter, regionFilter]);
 
 	useEffect(() => {
 		// Probe auth by calling an admin endpoint that doesn't depend on existing data.
@@ -135,24 +146,35 @@ export function AdminPage() {
 
 	useEffect(() => {
 		if (!loggedIn) return;
-		if (filter.type === 'model') {
-			const exists = embeddingChecks.some((c: any) => c.model === filter.model);
-			if (!exists) {
-				const first = embeddingChecks[0]?.model ?? '';
-				if (first) setFilter({ type: 'model', model: first });
-			}
-		} else if (filter.type === 'rerank') {
-			const exists = rerankChecks.some((c: any) => c.model === filter.model);
-			if (!exists) {
-				const first = rerankChecks[0]?.model ?? '';
-				if (first) setFilter({ type: 'rerank', model: first });
-			}
+		if (filter.type === 'head') return;
+		const list = checksForType(filter.type);
+		if (!list.some((c: any) => c.model === filter.model)) {
+			const first = list[0]?.model ?? '';
+			if (first) setFilter({ type: filter.type, model: first });
 		}
-	}, [loggedIn, filter, embeddingChecks, rerankChecks]);
+	}, [loggedIn, filter, modelChecks]);
+
+	async function loadSources() {
+		setSourcesLoading(true);
+		setSourcesError(null);
+		try {
+			setSources(await adminSources());
+		} catch (e: any) {
+			if (e?.status === 401) setLoggedIn(false);
+			else setSourcesError(getUserError(e, '数据源状态加载失败，请稍后重试。'));
+		} finally {
+			setSourcesLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		if (loggedIn) void loadSources();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [loggedIn]);
 
 	useEffect(() => {
 		if (!loggedIn) return;
-		if ((queryParams.type === 'model' || queryParams.type === 'rerank') && !queryParams.model) return;
+		if (queryParams.type !== 'head' && !('model' in queryParams && queryParams.model)) return;
 		setRowsLoading(true);
 		setRowsError(null);
 		adminResults({ ...queryParams, limit: 100 })
@@ -284,6 +306,109 @@ export function AdminPage() {
 				</Stack>
 			</Stack>
 
+			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+				<Stack spacing={2}>
+					<SectionHeader
+						icon={<CloudSyncOutlined fontSize="small" />}
+						title="数据源状态"
+						action={
+							<Button
+								variant="outlined"
+								size="small"
+								disabled={busy || syncing || sourcesLoading}
+								startIcon={syncing ? <CircularProgress size={16} color="inherit" /> : <SyncRounded />}
+								onClick={async () => {
+									setSyncing(true);
+									setSourcesError(null);
+									try {
+										await adminSyncSources();
+										await loadSources();
+										if (queryParams.type === 'head' || ('model' in queryParams && queryParams.model)) {
+											const r = await adminResults({ ...queryParams, limit: 100 });
+											setRows(r.results);
+										}
+									} catch (e: any) {
+										setSourcesError(getUserError(e, '同步失败，请稍后重试。'));
+									} finally {
+										setSyncing(false);
+									}
+								}}
+							>
+								{syncing ? '正在同步…' : '立即同步数据源'}
+							</Button>
+						}
+					/>
+					{sourcesError ? <Alert severity="error">{sourcesError}</Alert> : null}
+					{sourcesLoading && !sources ? <CircularProgress size={20} /> : null}
+					{sources ? (
+						<Stack spacing={1.25}>
+							<Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+								<Chip size="small" variant="outlined" label={`模式：${sources.mode}`} />
+								<Chip size="small" variant="outlined" label={`地区：${sources.regions.map((region) => region.label).join(' / ')}`} />
+								<Chip
+									size="small"
+									variant="outlined"
+									color={
+										sources.mode === 'live' &&
+										(!sources.sources.cloudprobe?.configured || sources.regions.some((region) => !region.probeUrl))
+											? 'warning'
+											: 'default'
+									}
+									label={
+										sources.mode !== 'live'
+											? '当前模式无需云函数拨测'
+											: !sources.sources.cloudprobe?.configured
+												? '云函数拨测未配置'
+												: `${sources.regions.filter((region) => region.probeUrl).length}/${sources.regions.length} 个地区已配置`
+									}
+								/>
+							</Stack>
+							{Object.entries(sources.sources)
+								.filter(([name]) =>
+									sources.mode === 'live' ? name === 'globalping' || name === 'cloudprobe' : name === sources.mode,
+								)
+								.map(([name, source]) => (
+									<Stack
+										key={name}
+										direction={{ xs: 'column', sm: 'row' }}
+										spacing={1}
+										alignItems={{ sm: 'center' }}
+										justifyContent="space-between"
+										sx={{ p: 1.25, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}
+									>
+										<Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+											<Typography variant="body2" fontWeight={700} sx={{ minWidth: 90 }}>
+												{name === 'globalping' ? 'Globalping' : name === 'cloudprobe' ? '云函数拨测' : name === 'mock' ? 'Mock 数据' : '本站直连'}
+											</Typography>
+											<Chip
+												size="small"
+												variant="outlined"
+												color={source.configured ? 'success' : 'default'}
+												label={source.configured ? '已配置' : '未配置'}
+											/>
+											<Typography variant="caption" color="text.secondary">
+												{source.last_sync_at ? `上次同步：${formatAgoShort(source.last_sync_at)}` : '尚未同步'}
+											</Typography>
+										</Stack>
+										<Stack spacing={0.25} sx={{ minWidth: 0 }}>
+											{source.last_error ? (
+												<Typography variant="caption" color="error.main" sx={{ overflowWrap: 'anywhere' }}>
+													错误：{source.last_error.slice(0, 160)}
+												</Typography>
+											) : null}
+											{!source.last_error && source.last_warning ? (
+												<Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+													{source.last_warning.slice(0, 160)}
+												</Typography>
+											) : null}
+										</Stack>
+									</Stack>
+								))}
+						</Stack>
+					) : null}
+				</Stack>
+			</Paper>
+
 			<ModelSelector
 				checks={checks}
 				busy={busy}
@@ -291,7 +416,8 @@ export function AdminPage() {
 				onChecksChange={setChecks}
 				onUnauthorized={() => setLoggedIn(false)}
 				onRunComplete={async () => {
-					if (queryParams.type === 'head' || queryParams.model) setRows((await adminResults({ ...queryParams, limit: 100 })).results);
+					if (queryParams.type === 'head' || ('model' in queryParams && queryParams.model))
+						setRows((await adminResults({ ...queryParams, limit: 100 })).results);
 				}}
 			/>
 
@@ -307,7 +433,7 @@ export function AdminPage() {
 								<Chip
 									size="small"
 									variant="outlined"
-									label={`${modelLikeChecks.filter((c) => c.enabled).length} / ${modelLikeChecks.length} 已启用`}
+									label={`${modelChecks.filter((c) => c.enabled).length} / ${modelChecks.length} 已启用`}
 								/>
 							)
 						}
@@ -327,11 +453,13 @@ export function AdminPage() {
 								labelId="new-check-type-label"
 								label="探测类型"
 								value={newCheckType}
-								onChange={(e) => setNewCheckType(e.target.value as any)}
+								onChange={(e) => setNewCheckType(e.target.value as ModelType)}
 								disabled={busy}
 							>
 								<MenuItem value="model">Embedding</MenuItem>
 								<MenuItem value="rerank">Reranker</MenuItem>
+								<MenuItem value="decisions">Decisions</MenuItem>
+								<MenuItem value="systemone">System One</MenuItem>
 							</Select>
 						</FormControl>
 						<TextField
@@ -341,7 +469,7 @@ export function AdminPage() {
 							value={newModel}
 							disabled={busy}
 							onChange={(e) => setNewModel(e.target.value)}
-							placeholder={newCheckType === 'model' ? '例如 Qwen/Qwen3-Embedding-4B' : '例如 Pro/BAAI/bge-reranker-v2-m3'}
+							placeholder={newCheckType === 'model' ? '例如 Qwen/Qwen3-Embedding-4B' : newCheckType === 'rerank' ? '例如 Pro/BAAI/bge-reranker-v2-m3' : '例如 typesafe/jev-latest'}
 						/>
 						<Button
 							variant="outlined"
@@ -370,8 +498,8 @@ export function AdminPage() {
 					</Stack>
 
 					<TableContainer>
-						<Table size="small" aria-label="模型检查项" sx={{ minWidth: modelLikeChecks.length ? 640 : undefined }}>
-							<TableHead sx={{ display: modelLikeChecks.length ? undefined : 'none' }}>
+						<Table size="small" aria-label="模型检查项" sx={{ minWidth: modelChecks.length ? 690 : undefined }}>
+							<TableHead sx={{ display: modelChecks.length ? undefined : 'none' }}>
 								<TableRow>
 									<TableCell width={120}>类型</TableCell>
 									<TableCell>模型名称</TableCell>
@@ -382,23 +510,22 @@ export function AdminPage() {
 								</TableRow>
 							</TableHead>
 							<TableBody>
-								{modelLikeChecks.length === 0 ? (
+								{modelChecks.length === 0 ? (
 									<TableRow>
 										<TableCell colSpan={4}>
 											<EmptyState icon={<PlaylistAddCheckRounded />} title={checksLoading ? '正在加载检查项…' : '暂无模型检查项'} />
 										</TableCell>
 									</TableRow>
 								) : (
-									modelLikeChecks.map((c: any) => (
+									modelChecks.map((c: any) => (
 										<TableRow key={c.id} hover>
 											<TableCell>
 												<Chip
 													size="small"
 													variant="outlined"
-													label={c.type === 'rerank' ? 'Reranker' : 'Embedding'}
+													label={TYPE_LABELS[c.type as ModelType]}
 													sx={{
-														bgcolor: c.type === 'rerank' ? '#f7f2ff' : 'primary.light',
-														color: c.type === 'rerank' ? '#8056b3' : 'primary.main',
+														...TYPE_STYLES[c.type],
 														borderColor: 'transparent',
 													}}
 												/>
@@ -487,36 +614,34 @@ export function AdminPage() {
 								variant="contained"
 								disabled={busy}
 								startIcon={running ? <CircularProgress size={18} color="inherit" /> : <PlayArrowRounded />}
-								title="对所有已启用的检查项执行一次探测"
+								title="立即同步 Globalping / 云函数拨测数据"
 								onClick={async () => {
 									setBusy(true);
 									setRunning(true);
 									setRowsError(null);
 									try {
 										await adminRun();
-										if (
-											queryParams.type === 'head' ||
-											((queryParams.type === 'model' || queryParams.type === 'rerank') && queryParams.model)
-										) {
+										await loadSources();
+										if (queryParams.type === 'head' || ('model' in queryParams && queryParams.model)) {
 											const r = await adminResults({ ...queryParams, limit: 100 });
 											setRows(r.results);
 										} else {
 											setRows([]);
 										}
 									} catch (e: any) {
-										setRowsError(getUserError(e, '探测未完成，请稍后重试。'));
+										setRowsError(getUserError(e, '同步未完成，请稍后重试。'));
 									} finally {
 										setBusy(false);
 										setRunning(false);
 									}
 								}}
 							>
-								{running ? '正在探测…' : '立即探测'}
+								{running ? '正在同步…' : '立即同步'}
 							</Button>
 						}
 					/>
 					<Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} useFlexGap alignItems={{ md: 'center' }}>
-						<FormControl size="small" sx={{ minWidth: 160 }}>
+						<FormControl size="small" sx={{ minWidth: 170 }}>
 							<InputLabel id="type-label">探测类型</InputLabel>
 							<Select
 								labelId="type-label"
@@ -524,23 +649,21 @@ export function AdminPage() {
 								value={filter.type}
 								disabled={busy}
 								onChange={(e) => {
-									const v = e.target.value as any;
-									if (v === 'head') setFilter({ type: 'head' });
-									else if (v === 'model') setFilter({ type: 'model', model: (embeddingChecks[0]?.model as string) || '' });
-									else if (v === 'rerank') setFilter({ type: 'rerank', model: (rerankChecks[0]?.model as string) || '' });
+									const value = e.target.value as 'head' | ModelType;
+									if (value === 'head') setFilter({ type: 'head' });
+									else setFilter({ type: value, model: (checksForType(value)[0]?.model as string) || '' });
 								}}
 							>
 								<MenuItem value="head">HEAD · 主站</MenuItem>
-								<MenuItem value="model" disabled={!embeddingChecks.length}>
-									Embedding
-								</MenuItem>
-								<MenuItem value="rerank" disabled={!rerankChecks.length}>
-									Reranker
-								</MenuItem>
+								{MODEL_TYPES.map((type) => (
+									<MenuItem key={type} value={type} disabled={!checksForType(type).length}>
+										{TYPE_LABELS[type]}
+									</MenuItem>
+								))}
 							</Select>
 						</FormControl>
 
-						{filter.type === 'model' || filter.type === 'rerank' ? (
+						{filter.type !== 'head' ? (
 							<FormControl size="small" sx={{ minWidth: 0, flex: { md: 1 }, maxWidth: { md: 460 } }}>
 								<InputLabel id="model-label">模型</InputLabel>
 								<Select
@@ -548,13 +671,9 @@ export function AdminPage() {
 									label="模型"
 									value={filter.model}
 									disabled={busy}
-									onChange={(e) =>
-										setFilter(
-											filter.type === 'model' ? { type: 'model', model: e.target.value } : { type: 'rerank', model: e.target.value },
-										)
-									}
+									onChange={(e) => setFilter({ type: filter.type, model: e.target.value })}
 								>
-									{(filter.type === 'model' ? embeddingChecks : rerankChecks).map((c: any) => (
+									{checksForType(filter.type).map((c: any) => (
 										<MenuItem key={c.model} value={c.model}>
 											{c.model}
 										</MenuItem>
@@ -562,15 +681,34 @@ export function AdminPage() {
 								</Select>
 							</FormControl>
 						) : null}
+
+						<FormControl size="small" sx={{ minWidth: 150 }}>
+							<InputLabel id="region-label">地区</InputLabel>
+							<Select
+								labelId="region-label"
+								label="地区"
+								value={regionFilter}
+								disabled={busy}
+								onChange={(e) => setRegionFilter(e.target.value)}
+							>
+								<MenuItem value="all">全部地区</MenuItem>
+								{(sources?.regions ?? []).map((region) => (
+									<MenuItem key={region.id} value={region.id}>
+										{region.label}
+									</MenuItem>
+								))}
+							</Select>
+						</FormControl>
 					</Stack>
 
 					{rowsError ? <Alert severity="error">{rowsError}</Alert> : null}
 
 					<TableContainer>
-						<Table size="small" aria-label="探测记录" sx={{ minWidth: orderedRows.length ? 600 : undefined }}>
+						<Table size="small" aria-label="探测记录" sx={{ minWidth: orderedRows.length ? 760 : undefined }}>
 							<TableHead sx={{ display: orderedRows.length ? undefined : 'none' }}>
 								<TableRow>
 									<TableCell>探测时间</TableCell>
+									<TableCell>地区</TableCell>
 									<TableCell>结果</TableCell>
 									<TableCell>状态码</TableCell>
 									<TableCell align="right">响应耗时</TableCell>
@@ -580,7 +718,7 @@ export function AdminPage() {
 							<TableBody>
 								{rowsLoading ? (
 									<TableRow>
-										<TableCell colSpan={5}>
+										<TableCell colSpan={6}>
 											<Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
 												<CircularProgress size={24} aria-label="正在加载探测记录" />
 											</Box>
@@ -588,7 +726,7 @@ export function AdminPage() {
 									</TableRow>
 								) : orderedRows.length === 0 ? (
 									<TableRow>
-										<TableCell colSpan={5}>
+										<TableCell colSpan={6}>
 											<EmptyState icon={<HistoryRounded />} title="暂无探测记录" />
 										</TableCell>
 									</TableRow>
@@ -596,6 +734,14 @@ export function AdminPage() {
 									orderedRows.map((r) => (
 										<TableRow key={r.id} hover>
 											<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{formatDateTime(r.ts)}</TableCell>
+											<TableCell sx={{ whiteSpace: 'nowrap' }}>
+												<Typography variant="caption" sx={{ display: 'block', fontWeight: 600 }}>
+													{r.region_id ? (sources?.regions.find((region) => region.id === r.region_id)?.label ?? r.region_id) : '整体'}
+												</Typography>
+												<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+													{r.source}
+												</Typography>
+											</TableCell>
 											<TableCell>
 												<Chip
 													size="small"

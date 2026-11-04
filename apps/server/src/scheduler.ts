@@ -1,5 +1,5 @@
 import { acquireScheduledSlot, forceSetLastRunAt, type Services } from './db';
-import { runAllChecks } from './checkRunner';
+import { runCollection } from './collector';
 
 export class RunBusyError extends Error {
 	constructor() {
@@ -7,11 +7,13 @@ export class RunBusyError extends Error {
 	}
 }
 
-export function createScheduler(services: Services, execute: typeof runAllChecks = runAllChecks, now = Date.now) {
-	let active: ReturnType<typeof runAllChecks> | null = null;
+export type SchedulerExecute = (services: Services, opts?: { triggeredBy: 'scheduled' | 'manual' }) => Promise<unknown>;
+
+export function createScheduler(services: Services, execute: SchedulerExecute = runCollection, now = Date.now) {
+	let active: Promise<unknown> | null = null;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
-	const intervalMs = services.config.checkIntervalSeconds * 1000;
+	const intervalMs = services.config.schedulerTickSeconds * 1000;
 
 	function run(triggeredBy: 'scheduled' | 'manual') {
 		if (active || stopped) {

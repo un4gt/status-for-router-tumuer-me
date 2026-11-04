@@ -1,0 +1,37 @@
+[
+	{
+		"id": "shanghai",
+		"label": "上海",
+		"code": "SHA",
+		"globalping": "Shanghai+CN",
+		"probe_url": ""
+	},
+	{
+		"id": "beijing",
+		"label": "北京",
+		"code": "BJS",
+		"globalping": "Beijing+CN",
+		"probe_url": ""
+	},
+	{
+		"id": "hongkong",
+		"label": "香港",
+		"code": "HKG",
+		"globalping": "Hong Kong+HK|Tsuen Wan+HK",
+		"probe_url": ""
+	},
+	{
+		"id": "tokyo",
+		"label": "东京",
+		"code": "TYO",
+		"globalping": "Tokyo+JP",
+		"probe_url": ""
+	},
+	{
+		"id": "siliconvalley",
+		"label": "硅谷",
+		"code": "SJC",
+		"globalping": "San Jose+US|Santa Clara+US|San Francisco+US",
+		"probe_url": ""
+	}
+]

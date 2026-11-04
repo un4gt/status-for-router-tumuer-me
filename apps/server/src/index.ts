@@ -21,7 +21,9 @@ const server = Bun.serve({
 	},
 });
 scheduler.start();
-console.log(`Router status listening on ${server.url}`);
+console.log(
+	`Router status listening on ${server.url} (mode=${config.monitoringMode}, regions=${config.regions.map((region) => region.id).join(',')})`,
+);
 
 let shuttingDown = false;
 async function shutdown() {

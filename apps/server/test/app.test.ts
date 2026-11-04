@@ -14,6 +14,7 @@ const fakeRun = async (_: unknown, options?: { triggeredBy: 'manual' | 'schedule
 	ok: true,
 	ts: Date.now(),
 	triggeredBy: options?.triggeredBy || 'manual',
+	sources: {},
 });
 async function login(app: ReturnType<typeof createApp>, headers: Record<string, string> = {}) {
 	const request = json({ username: 'operator', password: 'test-password' });
@@ -60,11 +61,16 @@ describe('HTTP API', () => {
 		services.db.exec('PRAGMA query_only=ON');
 		const response = await app.request('/api/public/summary');
 		expect(response.status).toBe(200);
-		expect((await response.json()).checks[0]).toMatchObject({ id: 'head:router', enabled: true, last_status: null });
+		const summary = await response.json();
+		expect(summary.checks.find((check: any) => check.id === 'net:root')).toMatchObject({
+			id: 'net:root',
+			enabled: true,
+			last_status: null,
+		});
 		for (const window of ['5h', '24h', '7d', '30d']) {
 			const series = await app.request(`/api/public/timeseries?type=head&window=${window}`);
 			expect(series.status).toBe(200);
-			expect(await series.json()).toMatchObject({ check_id: 'head:router', window, series: [] });
+			expect(await series.json()).toMatchObject({ check_id: 'net:root', window, series: [] });
 		}
 		expect((await app.request('/api/public/timeseries?type=head&window=invalid')).status).toBe(400);
 	});
@@ -107,7 +113,7 @@ describe('HTTP API', () => {
 			listChecks(services)
 				.filter((row) => row.enabled)
 				.map((row) => row.id),
-		).toEqual(['head:router', 'rerank:selected']);
+		).toEqual(['net:health', 'net:models', 'net:root', 'rerank:selected']);
 		expect((await app.request('/api/admin/checks', { headers })).status).toBe(200);
 	});
 	test('serves the frontend and /admin refresh while preserving API and missing-asset 404s', async () => {
@@ -125,6 +131,16 @@ describe('HTTP API', () => {
 		expect((await app.request('/assets/app.js')).status).toBe(200);
 		for (const path of ['/assets/missing.js', '/api/missing', '/.env', '/src/index.ts']) expect((await app.request(path)).status).toBe(404);
 		expect(await (await app.request('/healthz')).json()).toEqual({ ok: true });
+	});
+	test('serves mock model candidates without an upstream key', async () => {
+		const services = fixture({ monitoringMode: 'mock', apiKey: '' });
+		const app = createApp(services, createScheduler(services, fakeRun));
+		const cookie = (await login(app)).split(';')[0];
+		const response = await app.request('/api/admin/models', { headers: { cookie } });
+		expect(response.status).toBe(200);
+		const body = await response.json();
+		expect(body.models.some((model: any) => model.id === 'chat-model' && model.unsupported)).toBe(true);
+		expect(body.models.some((model: any) => model.id === 'custom-decision')).toBe(true);
 	});
 	test('returns 409 for overlapping manual runs', async () => {
 		const services = fixture();

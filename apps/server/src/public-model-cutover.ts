@@ -25,8 +25,8 @@ try {
       if (!journal || journal.rolledBack) throw new Error('No applied cutover to roll back');
       if (JSON.stringify(checks()) !== JSON.stringify(journal.after)) throw new Error('Check configuration changed; refusing rollback');
       for (const row of journal.before) {
-        db.query('INSERT INTO checks VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=excluded.type,target=excluded.target,model=excluded.model,enabled=excluded.enabled,created_at=excluded.created_at')
-          .run(row.id, row.type, row.target, row.model, row.enabled, row.created_at);
+        db.query('INSERT INTO checks (id,type,target,model,enabled,created_at,provider,external_id) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET type=excluded.type,target=excluded.target,model=excluded.model,enabled=excluded.enabled,created_at=excluded.created_at,provider=excluded.provider,external_id=excluded.external_id')
+          .run(row.id, row.type, row.target, row.model, row.enabled, row.created_at, row.provider, row.external_id);
       }
       db.exec('UPDATE results SET check_id=(SELECT check_id FROM public_model_result_origins o WHERE o.id=results.id) WHERE id IN (SELECT id FROM public_model_result_origins)');
       const original = new Set(journal.before.map(c => c.id));
@@ -60,8 +60,9 @@ try {
           const sources = moves.filter(m => m.target === move.target).map(m => m.source);
           if (sources.some(c => c.target !== move.source.target) || (oldTarget && oldTarget.target !== move.source.target)) throw new Error('Cannot merge different gateway targets');
           const enabled = oldTarget?.enabled ?? Number(sources.some(c => c.enabled));
-          db.query('INSERT INTO checks (id,type,target,model,enabled,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING')
-            .run(move.target, move.source.type, move.source.target, move.model, enabled, Math.min(...sources.map(c => c.created_at)));
+          const sourceRow = sources[0] ?? move.source;
+          db.query('INSERT INTO checks (id,type,target,model,enabled,created_at,provider,external_id) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING')
+            .run(move.target, move.source.type, move.source.target, move.model, enabled, Math.min(...sources.map(c => c.created_at)), sourceRow.provider, sourceRow.external_id);
           db.query('INSERT INTO public_model_result_origins SELECT id,check_id FROM results WHERE check_id=?').run(move.source.id);
           db.query('UPDATE results SET check_id=? WHERE check_id=?').run(move.target, move.source.id);
           db.query('DELETE FROM checks WHERE id=?').run(move.source.id);

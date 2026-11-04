@@ -69,6 +69,8 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 
 	return (
 		<Box
+			role="group"
+			aria-label="可用性时间条"
 			sx={{
 				display: 'flex',
 				gap: '3px',
@@ -100,7 +102,17 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 
 				return (
 					<Tooltip key={ts} title={title} arrow>
-						<Box sx={{ flex: '1 1 0', minWidth: 0, height, borderRadius: 1, bgcolor: color }} />
+						<Box
+							role="img"
+							aria-label={title}
+							sx={{
+								flex: '1 1 0',
+								minWidth: 0,
+								height,
+								borderRadius: 1,
+								bgcolor: color,
+							}}
+						/>
 					</Tooltip>
 				);
 			})}

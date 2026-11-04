@@ -30,6 +30,9 @@ export function fixture(overrides: Partial<Config> = {}): Services {
 			ADMIN_PASSWORD: 'test-password',
 			SESSION_SECRET: 'test-session-secret',
 			OPENAI_API_KEY: 'test-api-key',
+			MONITORING_MODE: 'direct',
+			// Keep tests independent from a developer's local data/regions.json.
+			MONITOR_REGIONS_FILE: './.cache/tests/does-not-exist-regions.json',
 		}),
 		...overrides,
 	};
