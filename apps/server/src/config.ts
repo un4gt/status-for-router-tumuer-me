@@ -13,6 +13,8 @@ export type RegionDefinition = {
 	code: string;
 	globalping: string;
 	probeUrl: string | null;
+	lat?: number;
+	lng?: number;
 };
 
 export const DEFAULT_REGIONS: RegionDefinition[] = [
@@ -72,12 +74,17 @@ function loadRegions(path: string): RegionDefinition[] {
 		const probeUrl = rawProbeUrl ? httpUrl(rawProbeUrl, `Region ${id} probe_url`) : null;
 		if (seen.has(id)) throw new Error(`Duplicate region id: ${id}`);
 		seen.add(id);
+		const coordinates = row.lat !== undefined || row.lng !== undefined;
+		if (coordinates && (!Number.isFinite(row.lat) || Math.abs(row.lat) > 90 || !Number.isFinite(row.lng) || Math.abs(row.lng) > 180)) {
+			throw new Error(`Region ${id} needs valid lat and lng coordinates`);
+		}
 		return {
 			id,
 			label,
 			code: typeof row?.code === 'string' && row.code.trim() ? row.code.trim() : id.slice(0, 3).toUpperCase(),
 			globalping,
 			probeUrl,
+			...(coordinates ? { lat: row.lat as number, lng: row.lng as number } : {}),
 		};
 	});
 }
@@ -117,6 +124,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 	const cloudProbeProbeTimeoutMs = positiveInteger('CLOUD_PROBE_PROBE_TIMEOUT_MS', 15_000, 500, 60_000);
 	const cloudProbeConcurrency = positiveInteger('CLOUD_PROBE_CONCURRENCY', 4, 1, 20);
 	const apiKey = env.OPENAI_API_KEY?.trim() || '';
+	const coordinate = (name: string, fallback: number, limit: number) => {
+		const value = env[name]?.trim() ? Number(env[name]) : fallback;
+		if (!Number.isFinite(value) || Math.abs(value) > limit) throw new Error(`${name} is outside its coordinate range`);
+		return value;
+	};
 	const regions = loadRegions(resolve(PROJECT_ROOT, env.MONITOR_REGIONS_FILE || './data/regions.json'));
 	const cam = {
 		secretId: env.TENCENTCLOUD_SECRET_ID?.trim() || '',
@@ -130,6 +142,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 		adminPassword: required('ADMIN_PASSWORD'),
 		sessionSecret: required('SESSION_SECRET'),
 		apiKey,
+		globeTarget: {
+			label: env.GLOBE_TARGET_LABEL?.trim() || '硅谷 · 服务目标',
+			lat: coordinate('GLOBE_TARGET_LAT', 37.3382, 90),
+			lng: coordinate('GLOBE_TARGET_LNG', -121.8863, 180),
+		},
 		routerBaseUrl,
 		headCheckUrl,
 		monitoringMode,

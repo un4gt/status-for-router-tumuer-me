@@ -21,6 +21,7 @@ import { signJwt, verifyJwt } from './jwt';
 import { getSummary, type WindowKey } from './summary';
 import { getBucketMs, getTimeseries } from './timeseries';
 import { getOverview, getSources } from './overview';
+import { getProbeDetail } from './probeDetail';
 
 const SESSION_COOKIE = 'router_status_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -55,7 +56,12 @@ function resolveRegion(services: Services, c: any): { regionId?: string; error?:
 function mockModelCandidates(services: Services) {
 	const candidates = new Map<
 		string,
-		{ id: string; detected_type: 'model' | 'rerank' | 'systemone' | 'decisions' | null; suggested_type: 'model' | 'rerank' | 'systemone' | 'decisions' | null; unsupported: boolean }
+		{
+			id: string;
+			detected_type: 'model' | 'rerank' | 'systemone' | 'decisions' | null;
+			suggested_type: 'model' | 'rerank' | 'systemone' | 'decisions' | null;
+			unsupported: boolean;
+		}
 	>();
 	for (const check of listChecks(services)) {
 		if (check.model && isModelType(check.type)) {
@@ -110,6 +116,16 @@ export function createApp(
 		const window = (c.req.query('window') || '24h') as WindowKey;
 		if (!(WINDOWS as readonly string[]).includes(window)) return c.json({ error: 'Invalid window' }, 400);
 		return c.json(getOverview(services, window));
+	});
+	app.get('/api/public/probe-detail', (c) => {
+		const window = (c.req.query('window') || '5h') as WindowKey;
+		if (!(WINDOWS as readonly string[]).includes(window)) return c.json({ error: 'Invalid window' }, 400);
+		const region = resolveRegion(services, c);
+		if (region.error || !region.regionId) return c.json({ error: 'A valid region is required' }, 400);
+		const checkId = c.req.query('check_id') || '';
+		const check = getCheckById(services, checkId);
+		if (!check?.enabled) return c.json({ error: 'Unknown or disabled check' }, 400);
+		return c.json(getProbeDetail(services, checkId, region.regionId, window));
 	});
 	app.get('/api/public/timeseries', (c) => {
 		const window = (c.req.query('window') || '24h') as WindowKey;
@@ -182,9 +198,7 @@ export function createApp(
 		}
 		params.push(limit);
 		const results = db
-			.query<ResultRow, (string | number)[]>(
-				`SELECT * FROM results WHERE ${conditions.join(' AND ')} ORDER BY ts DESC LIMIT ?`,
-			)
+			.query<ResultRow, (string | number)[]>(`SELECT * FROM results WHERE ${conditions.join(' AND ')} ORDER BY ts DESC LIMIT ?`)
 			.all(...params);
 		return c.json({ check_id: resolved.id, region: region.regionId ?? 'all', results });
 	});
@@ -240,13 +254,7 @@ export function createApp(
 		if (!Array.isArray(body?.checks)) return c.json({ error: 'Missing checks array' }, 400);
 		const checks = new Map<string, ModelSelection>();
 		for (const row of body.checks) {
-			if (
-				!row ||
-				!isModelType(row.type) ||
-				typeof row.model !== 'string' ||
-				!row.model.trim() ||
-				row.model.trim().length > 200
-			) {
+			if (!row || !isModelType(row.type) || typeof row.model !== 'string' || !row.model.trim() || row.model.trim().length > 200) {
 				return c.json({ error: 'Each model needs a valid name and an explicit probe type' }, 400);
 			}
 			const model = row.model.trim();

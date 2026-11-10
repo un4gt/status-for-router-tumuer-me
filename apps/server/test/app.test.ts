@@ -116,7 +116,7 @@ describe('HTTP API', () => {
 		).toEqual(['net:health', 'net:models', 'net:root', 'rerank:selected']);
 		expect((await app.request('/api/admin/checks', { headers })).status).toBe(200);
 	});
-	test('serves the frontend and /admin refresh while preserving API and missing-asset 404s', async () => {
+	test('serves frontend route refreshes while preserving API and missing-asset 404s', async () => {
 		const webRoot = temporaryDirectory();
 		writeFileSync(join(webRoot, 'index.html'), '<html>status-page-fixture</html>');
 		mkdirSync(join(webRoot, 'assets'));
@@ -129,7 +129,8 @@ describe('HTTP API', () => {
 			expect(await response.text()).toContain('status-page-fixture');
 		}
 		expect((await app.request('/assets/app.js')).status).toBe(200);
-		for (const path of ['/assets/missing.js', '/api/missing', '/.env', '/src/index.ts']) expect((await app.request(path)).status).toBe(404);
+		for (const path of ['/assets/missing.js', '/api/missing', '/.env', '/src/index.ts', '/_2d_3d', '/_2d_3d/'])
+			expect((await app.request(path)).status).toBe(404);
 		expect(await (await app.request('/healthz')).json()).toEqual({ ok: true });
 	});
 	test('serves mock model candidates without an upstream key', async () => {

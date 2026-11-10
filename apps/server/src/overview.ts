@@ -1,6 +1,7 @@
 import { getMeta, listChecks, type Services } from './db';
 import { getSummary, getWindowStarts, type AvailabilityStats, type WindowKey } from './summary';
 import { getBucketMs } from './timeseries';
+import { getTopology, regionCoordinates } from './topology';
 
 export type HealthStatus = 'operational' | 'degraded' | 'outage' | 'maintenance' | 'unknown';
 export type SeriesPoint = {
@@ -434,7 +435,7 @@ export function getOverview(services: Services, window: WindowKey = '24h', now =
 
 	const regionInfo = services.config.regions.map((region) => {
 		const card = gatewayRegionCards.find((item) => item.id === region.id);
-		return { id: region.id, label: region.label, code: region.code, status: card?.status ?? 'unknown' };
+		return { id: region.id, label: region.label, code: region.code, status: card?.status ?? 'unknown', coordinates: regionCoordinates(region) };
 	});
 
 	return {
@@ -442,6 +443,7 @@ export function getOverview(services: Services, window: WindowKey = '24h', now =
 		mode: services.config.monitoringMode,
 		window,
 		regions: regionInfo,
+		topology: getTopology(services.config),
 		gateway: {
 			status: worstStatus(gatewayRegionCards.map((region) => region.status)),
 			availability: gatewayAvailability,
