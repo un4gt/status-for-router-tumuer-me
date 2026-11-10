@@ -3,13 +3,28 @@ import { useId, useMemo, useState } from 'react';
 import type { SeriesPoint } from '../api';
 import { formatLatency } from '../format';
 
-const WIDTH = 100;
-const HEIGHT = 36;
+const WIDTH = 120;
+const HEIGHT = 34;
+const PAD_X = 4;
+const PAD_Y = 5;
+
+function buildSmoothPath(coords: Array<{ x: number; y: number }>): string {
+	if (coords.length === 0) return '';
+	if (coords.length === 1) return `M${coords[0].x.toFixed(2)},${coords[0].y.toFixed(2)}`;
+	let d = `M${coords[0].x.toFixed(2)},${coords[0].y.toFixed(2)}`;
+	for (let i = 0; i < coords.length - 1; i++) {
+		const curr = coords[i];
+		const next = coords[i + 1];
+		const cpx = (curr.x + next.x) / 2;
+		d += ` C${cpx.toFixed(2)},${curr.y.toFixed(2)} ${cpx.toFixed(2)},${next.y.toFixed(2)} ${next.x.toFixed(2)},${next.y.toFixed(2)}`;
+	}
+	return d;
+}
 
 export function Sparkline({
 	points,
 	color,
-	height = 44,
+	height = 34,
 	label = '延迟趋势',
 }: {
 	points: SeriesPoint[];
@@ -34,14 +49,30 @@ export function Sparkline({
 		const latencies = values.map((item) => item.point.avg_latency_ms as number);
 		const min = Math.min(...latencies);
 		const max = Math.max(...latencies);
-		const span = max - min || 1;
+		const sorted = [...latencies].sort((a, b) => a - b);
+		const p92 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.92))] ?? max;
+		const normalSpan = Math.max(p92 - min, Math.max(min * 0.15, 4));
+		const hasExtremeSpike = max > p92 + normalSpan * 1.8;
+		const visualMax = hasExtremeSpike ? p92 + normalSpan * 0.65 : Math.max(max, min + normalSpan);
+		const visualMin = Math.max(0, min - normalSpan * 0.18);
+		const span = visualMax - visualMin || 1;
+		const innerWidth = WIDTH - PAD_X * 2;
+		const innerHeight = HEIGHT - PAD_Y * 2;
+
 		const coords = values.map((item, position) => {
-			const x = values.length === 1 ? WIDTH : (position / (values.length - 1)) * WIDTH;
-			const y = HEIGHT - 3 - (((item.point.avg_latency_ms as number) - min) / span) * (HEIGHT - 8);
+			const x = values.length === 1 ? WIDTH - PAD_X : PAD_X + (position / (values.length - 1)) * innerWidth;
+			const rawVal = item.point.avg_latency_ms as number;
+			const normalized =
+				rawVal <= visualMax
+					? (rawVal - visualMin) / span
+					: Math.min(1.06, 0.92 + Math.min(0.14, ((rawVal - visualMax) / (max - visualMax || 1)) * 0.14));
+			const y = HEIGHT - PAD_Y - Math.max(0, normalized) * innerHeight;
 			return { x, y, point: item.point, originalIndex: item.index };
 		});
-		const line = coords.map((coord, index) => `${index === 0 ? 'M' : 'L'}${coord.x.toFixed(2)},${coord.y.toFixed(2)}`).join(' ');
-		const area = `${line} L${WIDTH},${HEIGHT} L0,${HEIGHT} Z`;
+		const line = buildSmoothPath(coords);
+		const firstX = coords[0].x.toFixed(2);
+		const lastX = coords.at(-1)!.x.toFixed(2);
+		const area = `${line} L${lastX},${HEIGHT} L${firstX},${HEIGHT} Z`;
 		return { coords, line, area, min, max };
 	}, [values]);
 

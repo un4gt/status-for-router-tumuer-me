@@ -15,7 +15,7 @@
 		"dev:server": "bun --watch apps/server/src/index.ts",
 		"start": "bun apps/server/src/index.ts",
 		"build:web": "bun run --cwd apps/web build",
-		"test": "bun test apps/server/test",
+		"test": "bun test apps/server/test apps/web/test",
 		"typecheck": "bun run --cwd apps/server typecheck && bun run --cwd apps/web typecheck",
 		"db:backup": "bun apps/server/src/backup.ts"
 	}

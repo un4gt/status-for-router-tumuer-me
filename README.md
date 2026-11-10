@@ -254,9 +254,42 @@ docker compose up -d app
 
 ## API
 
+### 2D / 3D 全球拨测视图
+
+2D 使用全宽布局：顶部总览固定，模型健康卡片占用视窗剩余高度。卡片标题、地区筛选和底部状态固定，仅模型列表在独立容器内虚拟滚动（`react-virtuoso`），展开地区明细不会撑高卡片或推动整页；滚动条隐藏，保留滚轮、触摸和键盘操作。手机上的地区总览单独限制高度并允许内部滚动。
+
+切换视图采用全屏内容切片翻转：复用页面 CSSOM 样式规则，通过 SVG foreignObject 截取当前与目标视图（包括异步冻结并捕获的 WebGL 画面），直接绘入各方块的 Canvas 正反面，沿对角线错时绕竖轴翻转，返回时反向播放。正方形边长根据视窗面积动态计算，大屏约 110 块，小屏减少块数；切换按钮共用右上角的固定控件，始终位于动画上方，位置和尺寸保持一致。2D 首屏数据就绪后，在空闲时预热真实 3D 场景并保留实例，隐藏时暂停地球渲染；目标视图准备期间保持原画面，返回 2D 恢复内部滚动位置，动画结束后释放快照。窗口尺寸变化时结束转场并恢复操作。参考 [Portal 2 原版菜单转场](https://stackoverflow.com/questions/36106477/how-to-make-portal-2-style-transitions)。
+
+转场期间继续按原有节奏请求监控数据，后端拨测调度独立运行；收到的结果先合并为最新完整快照，结束转场（或因窗口缩放中止）时统一显示，避免翻转途中重建图表或混入不同时间的结果。后续请求失败会保留最新成功数据，同一请求未完成时不会重复刷新。动画每帧只更新正在翻转的方块；已初始化的 WebGL 场景复用，隐藏时不上传数据，页面恢复可见也不会提前解除截图暂停。
+
+使用已安装的 Playwright CLI 验证转场（先启动 mock 前端）：`playwright-cli -s=status-transition open http://127.0.0.1:5173/`，随后运行 `playwright-cli -s=status-transition run-code --filename apps/web/test/viewTransition.playwright.cjs`。检查桌面/手机来回切换、按钮全程无位移、自适应正方形覆盖视窗、系统原生及减少动态效果设置下仍播放手动转场、滚动位置、隐藏地球停止渲染、重新显示后恢复渲染及无页面溢出，并返回各阶段耗时。
+
+地球统一在主线程渲染。首页 2D 首屏数据就绪后，空闲时预热真实 WebGL2 渲染器、纹理、着色器和首帧，随后保留同一个 Canvas、上下文和场景；2D/3D 切换只暂停与恢复渲染，不重新创建上下文，也不额外创建临时能力检测上下文。隐藏时不持续绘制或上传拨测数据，离开状态页时才释放资源；实际上下文丢失或 WebGL2 不可用时返回 2D，用户重新进入可重新初始化。支持触摸、双指缩放及横竖屏尺寸更新，DPR 上限为 2。没有 ImageBitmap 解码 API 时使用 HTML 图片解码。页面截图支持超时、取消与卸载清理。
+
+使用 `apps/web/test/globeCache.playwright.cjs` 验证主线程 WebGL 上下文复用、隐藏暂停、手机交互、旧版浏览器 API、截图中止与上下文丢失。Worker 实验已移除；手机模拟测试仍需与 Android / iOS 真机验证区分。测试报告、CPU profile 和历史实验数据保存在本机 `artifacts/`，不纳入 Git。
+
+拨测更新边界检查位于 `apps/web/test/viewTransitionRefresh.playwright.cjs`，通过同一轮询回调注入转场前、中、后的响应、失败与恢复，测试用本地 mock 数据。运行这两项浏览器检查时，先启动 mock Vite 并执行 `bun run build:web`，再运行 `bun apps/web/test/browserHarness.ts`：4176 端口提供生产构建和本地 mock API 代理，4174 端口将报告写入被忽略的 `artifacts/browser-tests/`；随后用 Playwright CLI 的 `run-code --filename` 执行相应测试脚本。
+
+状态页默认显示原有 2D 列表，顶部可切换到 `?mode=3d`。3D 使用 Three.js 自定义着色器，视觉参考 `react-globe.gl` 的 [airline-routes 原例](https://github.com/vasturiano/react-globe.gl/blob/6dbcf2113880d6fa0c68d6e8932e2bb4fb2df0ba/example/airline-routes/us-international-outbound.html) 改编，沿用夜景纹理、透明细飞线及错开的动画相位；正常链路用完整淡色底线叠加更亮的移动光段，只有故障链路显示断线。地球独占完整视窗，没有固定侧栏或模型筛选栏；纹理随应用本地提供，首屏显示后延迟加载 3D 模块。
+
+- **低层飞线**：所有 Globalping HTTP 端点总耗时；不是 ICMP RTT。正常时为青色到绿色的渐变。
+- **高层飞线**：所有启用模型的完整 HTTP 请求耗时，包含网络和模型处理。每个模型各有独立飞线、状态和动画速度，默认同时显示，不需要逐个切换，也不会混合统计或相加。两类来源仍可单独查看。
+- 延迟越高，飞线越慢。动画周期采用有界对数映射 `min(8500, 1000 + 1100 × ln(1 + latency_ms / 80))` 毫秒；弧线高度只区分图层与地理距离，不表示真实路由或延迟。
+- 正常绿、小幅慢波纹；降级/高延迟黄、中幅波纹；故障红、大幅波纹和静止断线。高延迟提示阈值为网络 1 秒、模型 3 秒；无新数据为灰色。超过三个采集周期（至少两分钟）即视为过期。没有测量丢包率，因此不会把 HTTP 失败标成丢包率。
+- 悬停飞线显示检查项名称和耗时，点击飞线直达该检查项的 P95/P99、成功率和最近 24 条检查历史。点击地区则展开该地区所有端点与模型的列表，再按需下钻；关闭浮层即恢复纯地球画面。分位数直接从所选地区、检查项和当前来源的原始成功样本计算（最近秩），缺失桶断线；错误和超时保留在成功率及历史中。少量样本的 P95/P99 可能重合。
+- 中键旋转，Shift＋中键平移，滚轮缩放，左键选择。触屏单指旋转、双指缩放；地球获得键盘焦点后，方向键旋转，`+`/`-` 缩放。底部按钮直接控制数据动画的播放与暂停；手动切换 2D/3D 始终播放页面方块翻转。
+- 主动点击 3D 或通过 `?mode=3d` 打开时，始终尊重用户选择：弱网、节流、CPU/内存估算和低帧率不会强制切回 2D。仅在 WebGL 2 无法创建、上下文丢失或视图实际加载/渲染失败时返回 2D 并显示原因。3D 使用完整视窗，小屏详情为浮动面板，可随时手动切回 2D。
+
+默认服务目标为硅谷（示意位置，不是 IP 定位）。通过 `.env` 的 `GLOBE_TARGET_LABEL`、`GLOBE_TARGET_LAT`、`GLOBE_TARGET_LNG` 配置；这些字段可参考 `.env.example`，未设置时使用默认值。五个内置探测地区使用城市中心坐标，自定义地区可在 `regions.json` 添加数字 `lat` / `lng`；未知坐标不猜测，仍可在 2D 查看。同城节点不绘制零长度飞线。
+
+使用 `bun run dev:web:mock` 可以只启动模拟页面，不启动后端调度器或真实拨测。
+
+### 接口列表
+
 公共接口：
 
 - `GET /api/public/overview?window=5h|24h|7d|30d`：首屏聚合数据，包含 `mode`、`regions`、`gateway`（端点 + 地区卡）、`models`（整体 + 分地区 + series）和 `sources` 状态。
+- `GET /api/public/probe-detail?check_id=...&region=<地区 id>&window=5h|24h|7d|30d`：单检查、单地区的成功耗时 P95/P99 时间桶、总体成功率与有限历史；公开响应不包含错误原文、密钥或云函数 URL。`overview` 同时提供地区 `coordinates` 和安全的 `topology` 目标/采集周期。
 - `GET /api/public/summary`：原有汇总结构，并新增 `provider`、`stats_by_region`、`last_by_region`。
 - `GET /api/public/timeseries?type=head|model|rerank|systemone|decisions&model=...&window=...&region=all|<地区 id>&check_id=...`：`type=head` 映射到当前网络根检查 `net:root`；旧 `head:router` 历史用 `check_id=head:router` 查询。
 

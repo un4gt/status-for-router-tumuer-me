@@ -14,11 +14,15 @@ export default defineConfig(({ command, mode }) => {
 	return {
 		plugins: useMock ? [react(), mockApiPlugin()] : [react()],
 		server: {
+			host: '0.0.0.0',
+			port: 5173,
+			strictPort: true,
 			proxy: useMock
 				? undefined
 				: {
 						'/api': 'http://127.0.0.1:8787',
 					},
 		},
+		preview: { host: '0.0.0.0' },
 	};
 });

@@ -1,4 +1,5 @@
 import { Box, Tooltip, useTheme } from '@mui/material';
+import { memo } from 'react';
 import type { TimeseriesResponse } from '../api';
 
 function bucketRange(from: number, to: number, step: number) {
@@ -9,8 +10,9 @@ function bucketRange(from: number, to: number, step: number) {
 	return out;
 }
 
+const dateTimeFormat = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', month: '2-digit', day: '2-digit' });
 function formatDateTimeShort(ts: number) {
-	return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', month: '2-digit', day: '2-digit' }).format(new Date(ts));
+	return dateTimeFormat.format(ts);
 }
 
 export type UptimeBarProps = {
@@ -20,7 +22,7 @@ export type UptimeBarProps = {
 	height?: number;
 };
 
-export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, height = 14 }: UptimeBarProps) {
+export const UptimeBar = memo(function UptimeBar({ timeseries, loading = false, placeholderCount = 48, height = 16 }: UptimeBarProps) {
 	const theme = useTheme();
 
 	if (loading) {
@@ -28,12 +30,12 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 			<Box
 				sx={{
 					display: 'flex',
-					gap: '3px',
+					gap: '3.5px',
 					alignItems: 'center',
 					width: '100%',
 					minWidth: 0,
 					overflow: 'hidden',
-					py: '2px',
+					py: '1px',
 					'@keyframes barPulse': {
 						'0%': { opacity: 0.35 },
 						'50%': { opacity: 0.9 },
@@ -49,8 +51,8 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 							flex: '1 1 0',
 							minWidth: 0,
 							height,
-							borderRadius: 1,
-							bgcolor: theme.palette.action.disabledBackground,
+							borderRadius: '3px',
+							bgcolor: '#e2e8f0',
 							animation: 'barPulse 1.2s ease-in-out infinite',
 							animationDelay: `${(idx % 24) * 0.03}s`,
 							'@media (prefers-reduced-motion: reduce)': { animation: 'none' },
@@ -61,7 +63,7 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 		);
 	}
 
-	if (!timeseries) return <Box sx={{ display: 'flex', gap: '3px', alignItems: 'center', width: '100%' }} />;
+	if (!timeseries) return <Box sx={{ display: 'flex', gap: '3.5px', alignItems: 'center', width: '100%' }} />;
 
 	const { from, to, bucket_ms: bucketMs, series } = timeseries;
 	const buckets = bucketRange(from, to, bucketMs);
@@ -73,7 +75,7 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 			aria-label="可用性时间条"
 			sx={{
 				display: 'flex',
-				gap: '3px',
+				gap: '3.5px',
 				alignItems: 'center',
 				width: '100%',
 				minWidth: 0,
@@ -89,16 +91,17 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 				const avgLatency = point?.avg_latency_ms ?? null;
 
 				let color: string;
-				if (!point || total === 0 || availability === null) color = theme.palette.action.disabledBackground;
+				if (!point || total === 0 || availability === null) color = '#e2e8f0';
 				else if (availability === 1) color = theme.palette.success.main;
 				else if (availability === 0) color = theme.palette.error.main;
 				else color = theme.palette.warning.main;
 
 				const availabilityText = availability === null ? '—' : `${(availability * 100).toFixed(2)}%`;
 				const timeRange = `${formatDateTimeShort(ts)} – ${formatDateTimeShort(ts + bucketMs)}`;
-				const title = point && total > 0
-					? `${timeRange}  |  ${success}/${total}  |  ${availabilityText}${avgLatency === null ? '' : `  |  ${avgLatency}ms`}`
-					: `${timeRange}  |  ${ts + bucketMs > to ? '本时段尚无检测记录' : '暂无检测记录'}`;
+				const title =
+					point && total > 0
+						? `${timeRange}  |  ${success}/${total}  |  ${availabilityText}${avgLatency === null ? '' : `  |  ${avgLatency}ms`}`
+						: `${timeRange}  |  ${ts + bucketMs > to ? '本时段尚无检测记录' : '暂无检测记录'}`;
 
 				return (
 					<Tooltip key={ts} title={title} arrow>
@@ -109,8 +112,13 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 								flex: '1 1 0',
 								minWidth: 0,
 								height,
-								borderRadius: 1,
+								borderRadius: '3px',
 								bgcolor: color,
+								transition: 'transform 120ms ease, opacity 120ms ease',
+								'&:hover': {
+									transform: 'scaleY(1.16)',
+									opacity: 0.85,
+								},
 							}}
 						/>
 					</Tooltip>
@@ -118,4 +126,4 @@ export function UptimeBar({ timeseries, loading = false, placeholderCount = 48, 
 			})}
 		</Box>
 	);
-}
+});

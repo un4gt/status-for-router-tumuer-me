@@ -54,7 +54,8 @@ export type RegionStats = {
 	series: Series;
 };
 
-export type RegionInfo = { id: string; label: string; code: string; status: HealthStatus };
+export type Coordinates = { lat: number; lng: number };
+export type RegionInfo = { id: string; label: string; code: string; status: HealthStatus; coordinates: Coordinates | null };
 
 export type GatewayEndpoint = {
 	id: string;
@@ -101,6 +102,7 @@ export type OverviewResponse = {
 	mode: 'live' | 'mock' | 'direct';
 	window: WindowKey;
 	regions: RegionInfo[];
+	topology: { target: Coordinates & { label: string }; intervals: { network: number; model: number } };
 	gateway: {
 		status: HealthStatus;
 		availability: number | null;
@@ -171,6 +173,22 @@ export async function fetchOverview(window: WindowKey, signal?: AbortSignal): Pr
 	const resp = await apiFetch(`/api/public/overview?${qs.toString()}`, { signal, cache: 'no-store' });
 	if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 	return resp.json();
+}
+
+export type ProbeDetail = {
+	check_id: string; region: string; source: string; window: WindowKey;
+	from: number; to: number; bucket_ms: number;
+	total_count: number; success_count: number; availability: number | null;
+	sample_count: number; p95_ms: number | null; p99_ms: number | null;
+	series: Array<{ ts: number; sample_count: number; p95_ms: number | null; p99_ms: number | null }>;
+	history: Array<{ ts: number; success: number; status_code: number | null; latency_ms: number | null }>;
+};
+
+export async function fetchProbeDetail(checkId: string, region: string, window: WindowKey, signal: AbortSignal): Promise<ProbeDetail> {
+	const query = new URLSearchParams({ check_id: checkId, region, window });
+	const response = await apiFetch(`/api/public/probe-detail?${query}`, { signal, cache: 'no-store' });
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	return response.json();
 }
 
 export async function fetchSummary(signal?: AbortSignal): Promise<SummaryResponse> {

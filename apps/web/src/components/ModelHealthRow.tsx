@@ -2,10 +2,19 @@ import { Box, Chip, Collapse, IconButton, Stack, Table, TableBody, TableCell, Ta
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import { useState } from 'react';
 import type { ModelHealth, RegionInfo, RegionStats, WindowKey } from '../api';
-import { STATUS_BACKGROUNDS, STATUS_COLORS, STATUS_LABELS, TYPE_LABELS, availabilityStatus } from '../constants';
+import {
+	STATUS_BACKGROUNDS,
+	STATUS_BORDERS,
+	STATUS_COLORS,
+	STATUS_LABELS,
+	TYPE_LABELS,
+	TYPE_STYLES,
+	availabilityStatus,
+} from '../constants';
 import { formatAgoShort, formatLatency, formatPercent } from '../format';
 import { UptimeBar } from './UptimeBar';
 import { StatusDot } from './StatusDot';
+import { latencyTier, TIER_TEXT } from '../latency';
 
 function emptyRegionStats(series: ModelHealth['series'], status: RegionStats['status'] = 'unknown'): RegionStats {
 	return {
@@ -51,6 +60,8 @@ export function ModelHealthRow({
 	windowKey,
 	now,
 	onRegionSelect,
+	expanded: controlledExpanded,
+	onExpandedChange,
 }: {
 	model: ModelHealth;
 	regions: RegionInfo[];
@@ -58,142 +69,208 @@ export function ModelHealthRow({
 	windowKey: WindowKey;
 	now: number;
 	onRegionSelect: (region: string) => void;
+	expanded?: boolean;
+	onExpandedChange?: (expanded: boolean) => void;
 }) {
-	const [expanded, setExpanded] = useState(false);
+	const [localExpanded, setLocalExpanded] = useState(false);
+	const expanded = controlledExpanded ?? localExpanded;
+	const setExpanded = onExpandedChange ?? setLocalExpanded;
 	const { stats, series } = SelectedRegionStats({ model, regionFilter });
-	const availabilityChipStatus = stats.status === 'unknown' ? availabilityStatus(stats.availability, stats.total_count) : stats.status;
+	const computedStatus = availabilityStatus(stats.availability, stats.total_count);
+	const availabilityChipStatus =
+		regionFilter === 'all'
+			? stats.last_status === 'failure'
+				? stats.status
+				: computedStatus
+			: stats.status === 'unknown'
+				? computedStatus
+				: stats.status;
 	const hasData = stats.total_count > 0;
 	const probeMissing = !model.probe_configured;
-	const regionDetailUnavailable =
-		model.total_count > 0 && Object.values(model.regions).every((region) => region.total_count === 0);
+	const regionDetailUnavailable = model.total_count > 0 && Object.values(model.regions).every((region) => region.total_count === 0);
 	const color = STATUS_COLORS[availabilityChipStatus];
+	const typeStyle = TYPE_STYLES[model.type] ?? TYPE_STYLES.model;
 
 	return (
 		<Box
 			sx={{
-				py: 1.5,
+				'--model-name-width': { md: '300px', lg: '336px' },
+				'--model-stats-width': { md: '215px', lg: '235px' },
+				'--model-regions-width': { md: '148px', lg: '160px' },
+				px: { xs: 1.25, md: 1.5 },
+				py: { xs: 1, md: 1.1 },
+				'@media (min-width: 900px) and (max-height: 860px)': { py: 0.85 },
+				borderRadius: '10px',
 				opacity: model.enabled ? 1 : 0.62,
-				transition: 'opacity 160ms ease',
-				'& + &': { borderTop: '1px solid', borderColor: 'divider' },
+				transition: 'background-color 140ms ease, border-color 140ms ease, opacity 160ms ease',
+				border: '1px solid transparent',
+				'&:hover': { bgcolor: '#f8fafc', borderColor: '#eef2f6' },
+				'& + &': { borderTop: '1px solid #f1f5f9' },
 			}}
 		>
-			<Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 1.25, md: 2 }} alignItems={{ md: 'center' }}>
-				<Stack direction="row" spacing={1.25} alignItems="center" sx={{ minWidth: 0, width: { md: '34%' }, flexShrink: 0 }}>
+			<Stack direction={{ xs: 'column', md: 'row' }} spacing={{ xs: 1, md: 2 }} alignItems={{ md: 'center' }}>
+				<Stack
+					data-model-identity
+					direction="row"
+					spacing={1}
+					alignItems="center"
+					sx={{ minWidth: 0, width: { md: 'var(--model-name-width)' }, flexShrink: 0 }}
+				>
 					<StatusDot status={availabilityChipStatus} size={8} />
-					<Box sx={{ minWidth: 0, flex: 1 }}>
+					<Tooltip title={model.model} arrow disableInteractive>
 						<Typography
 							variant="subtitle1"
-							fontWeight={600}
+							fontWeight={400}
+							noWrap
 							sx={{
 								fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-								fontSize: '0.8125rem',
-								overflowWrap: 'anywhere',
-								lineHeight: 1.45,
+								fontSize: '0.825rem',
+								color: '#0f172a',
+								lineHeight: 1.3,
+								minWidth: 0,
 							}}
 						>
 							{model.model}
 						</Typography>
-						<Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center" sx={{ mt: 0.5 }}>
-							<Chip
-								size="small"
-								variant="outlined"
-								label={TYPE_LABELS[model.type]}
-								sx={{ height: 20, fontSize: '0.6875rem', borderColor: 'divider' }}
-							/>
-							{!model.enabled ? (
-								<Chip size="small" variant="outlined" label="已停用" sx={{ height: 20, fontSize: '0.6875rem', color: 'text.secondary' }} />
-							) : null}
-							{probeMissing ? (
-								<Chip
-									size="small"
-									variant="outlined"
-									label="未配置拨测"
-									sx={{ height: 20, fontSize: '0.6875rem', color: 'warning.dark', borderColor: '#ecd9ae', bgcolor: '#fff8e8' }}
-								/>
-							) : null}
-							{regionDetailUnavailable ? (
-								<Chip
-									size="small"
-									variant="outlined"
-									label="地区明细不可用"
-									sx={{ height: 20, fontSize: '0.6875rem', color: 'text.secondary' }}
-								/>
-							) : null}
-						</Stack>
+					</Tooltip>
+					<Box
+						component="span"
+						sx={{
+							display: 'inline-flex',
+							alignItems: 'center',
+							flexShrink: 0,
+							px: 0.7,
+							py: 0.15,
+							borderRadius: '6px',
+							fontSize: '0.675rem',
+							fontWeight: 600,
+							color: typeStyle.color,
+							bgcolor: typeStyle.bg,
+							border: '1px solid',
+							borderColor: typeStyle.border,
+							lineHeight: 1.25,
+						}}
+					>
+						{TYPE_LABELS[model.type]}
 					</Box>
+					{!model.enabled ? (
+						<Chip size="small" variant="outlined" label="已停用" sx={{ height: 18, fontSize: '0.65rem', color: 'text.secondary' }} />
+					) : null}
+					{probeMissing ? (
+						<Chip
+							size="small"
+							variant="outlined"
+							label="未配置拨测"
+							sx={{ height: 18, fontSize: '0.65rem', color: 'warning.dark', borderColor: '#fde68a', bgcolor: '#fffbeb' }}
+						/>
+					) : null}
+					{regionDetailUnavailable ? (
+						<Chip
+							size="small"
+							variant="outlined"
+							label="地区明细不可用"
+							sx={{ height: 18, fontSize: '0.65rem', color: 'text.secondary' }}
+						/>
+					) : null}
 				</Stack>
 
-				<Stack direction="row" spacing={1.5} alignItems="center" sx={{ width: { md: 210 }, flexShrink: 0 }}>
+				<Stack direction="row" spacing={1.25} alignItems="center" sx={{ width: { md: 'var(--model-stats-width)' }, flexShrink: 0 }}>
 					<Chip
 						size="small"
 						label={hasData ? formatPercent(stats.availability) : probeMissing ? '待配置' : '无数据'}
 						sx={{
-							minWidth: 72,
+							minWidth: 68,
+							height: 24,
 							fontWeight: 700,
+							fontSize: '0.74rem',
 							fontVariantNumeric: 'tabular-nums',
 							bgcolor: STATUS_BACKGROUNDS[availabilityChipStatus],
 							color,
-							border: '1px solid transparent',
+							border: '1px solid',
+							borderColor: STATUS_BORDERS[availabilityChipStatus],
 						}}
 					/>
-					<Box sx={{ minWidth: 0 }}>
-						<Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontVariantNumeric: 'tabular-nums' }}>
-							平均 {formatLatency(stats.avg_latency_ms)}
+					<Stack direction="row" spacing={0.6} alignItems="baseline" sx={{ minWidth: 0, whiteSpace: 'nowrap' }}>
+						<Typography
+							component="span"
+							sx={{
+								color: TIER_TEXT[latencyTier(stats.last_latency_ms ?? stats.avg_latency_ms, stats.last_status === 'failure')],
+								fontSize: '0.78rem',
+								fontWeight: 650,
+								fontVariantNumeric: 'tabular-nums',
+							}}
+						>
+							{formatLatency(stats.avg_latency_ms)}
 						</Typography>
-						<Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontVariantNumeric: 'tabular-nums' }}>
+						<Typography component="span" sx={{ color: '#94a3b8', fontSize: '0.7rem', fontVariantNumeric: 'tabular-nums' }}>
 							p95 {formatLatency(stats.p95_ms)}
 						</Typography>
-					</Box>
+					</Stack>
 				</Stack>
 
-				<Box sx={{ flexGrow: 1, minWidth: 0 }}>
+				<Box sx={{ flexGrow: 1, minWidth: 0, px: { md: 0.5 } }}>
 					<UptimeBar loading={false} timeseries={hasData ? series : null} height={16} />
-					<Stack direction="row" justifyContent="space-between" spacing={1}>
-						<Typography variant="caption" color="text.secondary">
-							{hasData ? `${windowKey} 窗口` : '—'}
-						</Typography>
-						<Typography variant="caption" color="text.secondary">
-							{hasData ? `上次检测：${formatAgoShort(stats.last_checked_at, now)}` : '尚无检测记录'}
-						</Typography>
-					</Stack>
 				</Box>
 
-				<Stack direction="row" spacing={0.25} alignItems="center" sx={{ flexShrink: 0 }}>
-					{regions.map((region) => {
-						const regionStats = model.regions[region.id];
-						const status = regionStats?.status ?? 'unknown';
-						return (
-							<Tooltip
-								key={region.id}
-								arrow
-								title={`${region.label} · ${STATUS_LABELS[status]} · 可用率 ${formatPercent(regionStats?.availability ?? null)} · p95 ${formatLatency(regionStats?.p95_ms ?? null)}`}
-							>
-								<Box
-									component="button"
-									type="button"
-									aria-label={`查看 ${region.label} 的模型状态`}
-									onClick={() => onRegionSelect(region.id)}
-									sx={{
-										border: 0,
-										background: 'transparent',
-										p: 0.4,
-										cursor: 'pointer',
-										borderRadius: '50%',
-										display: 'inline-flex',
-										'&:focus-visible': { outline: '2px solid #b7c9ff', outlineOffset: 1 },
-									}}
+				<Stack
+					direction="row"
+					spacing={0.75}
+					alignItems="center"
+					justifyContent={{ xs: 'flex-start', md: 'flex-end' }}
+					sx={{ width: { md: 'var(--model-regions-width)' }, flexShrink: 0 }}
+				>
+					<Stack
+						direction="row"
+						spacing={0.35}
+						alignItems="center"
+						sx={{
+							px: 0.75,
+							py: 0.35,
+							borderRadius: '999px',
+							bgcolor: '#f8fafc',
+							border: '1px solid #eef2f6',
+						}}
+					>
+						{regions.map((region) => {
+							const regionStats = model.regions[region.id];
+							const status = regionStats?.status ?? 'unknown';
+							const isSelected = regionFilter === region.id;
+							return (
+								<Tooltip
+									key={region.id}
+									arrow
+									title={`${region.label} · ${STATUS_LABELS[status]} · 可用率 ${formatPercent(regionStats?.availability ?? null)} · p95 ${formatLatency(regionStats?.p95_ms ?? null)}`}
 								>
-									<StatusDot status={status} size={regionFilter === region.id ? 10 : 7} pulse={false} />
-								</Box>
-							</Tooltip>
-						);
-					})}
+									<IconButton
+										size="small"
+										aria-label={`查看 ${region.label} 的模型状态`}
+										onClick={() => onRegionSelect(region.id)}
+										sx={{
+											width: 20,
+											height: 20,
+											p: 0,
+											bgcolor: isSelected ? '#eff6ff' : 'transparent',
+											boxShadow: isSelected ? '0 0 0 1.5px #3b82f6' : 'none',
+											'&:hover': { bgcolor: '#e2e8f0' },
+										}}
+									>
+										<StatusDot status={status} size={7} pulse={false} />
+									</IconButton>
+								</Tooltip>
+							);
+						})}
+					</Stack>
 					<IconButton
 						size="small"
 						aria-label={expanded ? '收起分地区明细' : '展开分地区明细'}
 						aria-expanded={expanded}
-						onClick={() => setExpanded((value) => !value)}
-						sx={{ ml: 0.5 }}
+						onClick={() => setExpanded(!expanded)}
+						sx={{
+							width: 26,
+							height: 26,
+							color: '#64748b',
+							'&:hover': { bgcolor: '#f1f5f9', color: '#0f172a' },
+						}}
 					>
 						<ExpandMoreRounded
 							fontSize="small"
@@ -204,32 +281,58 @@ export function ModelHealthRow({
 			</Stack>
 
 			<Collapse in={expanded} timeout={180} unmountOnExit>
-				<Box sx={{ mt: 1.25, ml: { md: 'calc(34% + 12px)' }, overflowX: 'auto' }}>
+				<Box
+					sx={{
+						mt: 1,
+						ml: { md: 'calc(var(--model-name-width) + 16px)' },
+						overflowX: 'auto',
+						scrollbarWidth: 'none',
+						'&::-webkit-scrollbar': { display: 'none', width: 0, height: 0 },
+						borderRadius: '10px',
+						border: '1px solid #eef2f6',
+						bgcolor: '#f8fafc',
+						px: 1,
+						py: 0.5,
+					}}
+				>
 					<Table size="small" aria-label={`${model.model} 分地区明细`}>
 						<TableBody>
 							{regions.map((region) => {
 								const regionStats = model.regions[region.id];
 								const hasRegionData = (regionStats?.total_count ?? 0) > 0;
+								const rStatus = regionStats?.status ?? 'unknown';
 								return (
-									<TableRow key={region.id} hover>
+									<TableRow key={region.id} hover sx={{ '& td': { borderColor: '#eef2f6', py: 0.6 } }}>
 										<TableCell sx={{ width: 1, whiteSpace: 'nowrap' }}>
 											<Stack direction="row" spacing={0.75} alignItems="center">
-												<StatusDot status={regionStats?.status ?? 'unknown'} size={7} pulse={false} />
-												<Typography variant="caption" fontWeight={600}>
+												<StatusDot status={rStatus} size={7} pulse={false} />
+												<Typography variant="caption" fontWeight={700} sx={{ color: '#1e293b' }}>
 													{region.label}
 												</Typography>
 											</Stack>
 										</TableCell>
-										<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+										<TableCell
+											sx={{
+												whiteSpace: 'nowrap',
+												fontVariantNumeric: 'tabular-nums',
+												fontWeight: 700,
+												fontSize: '0.75rem',
+												color: hasRegionData ? STATUS_COLORS[rStatus] : 'text.secondary',
+											}}
+										>
 											{hasRegionData ? formatPercent(regionStats.availability) : '无数据'}
 										</TableCell>
-										<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: 'text.secondary' }}>
-											平均 {formatLatency(regionStats?.avg_latency_ms ?? null)}
+										<TableCell
+											sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: 'text.secondary', fontSize: '0.75rem' }}
+										>
+											均值 {formatLatency(regionStats?.avg_latency_ms ?? null)}
 										</TableCell>
-										<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: 'text.secondary' }}>
+										<TableCell
+											sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', color: 'text.secondary', fontSize: '0.75rem' }}
+										>
 											p95 {formatLatency(regionStats?.p95_ms ?? null)}
 										</TableCell>
-										<TableCell sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}>
+										<TableCell sx={{ whiteSpace: 'nowrap', color: '#94a3b8', fontSize: '0.72rem' }}>
 											{formatAgoShort(regionStats?.last_checked_at ?? null, now)}
 										</TableCell>
 										<TableCell sx={{ minWidth: 220 }}>

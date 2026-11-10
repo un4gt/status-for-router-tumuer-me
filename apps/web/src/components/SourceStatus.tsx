@@ -51,18 +51,53 @@ export function SourceStatusBar({ overview }: { overview: OverviewResponse }) {
 				? ['direct']
 				: ['globalping', 'cloudprobe'];
 	return (
-		<Stack direction="row" spacing={2} useFlexGap flexWrap="wrap" alignItems="center" sx={{ minWidth: 0 }}>
-			{names.map((name) =>
-				overview.sources[name] ? <SourceItem key={name} name={name} source={overview.sources[name]} /> : null,
-			)}
-			{overview.mode === 'mock' ? (
-				<Stack direction="row" spacing={0.5} alignItems="center">
-					<ScienceOutlined sx={{ fontSize: 14, color: 'warning.main' }} />
-					<Typography variant="caption" color="warning.dark">
-						模拟数据，仅用于联调
+		<Stack
+			direction="row"
+			spacing={2}
+			useFlexGap
+			flexWrap="wrap"
+			alignItems="center"
+			justifyContent="space-between"
+			sx={{ minWidth: 0, pt: 0.25 }}
+		>
+			<Stack direction="row" spacing={2} useFlexGap flexWrap="wrap" alignItems="center" sx={{ minWidth: 0 }}>
+				{names.map((name) =>
+					overview.sources[name] ? <SourceItem key={name} name={name} source={overview.sources[name]} /> : null,
+				)}
+				{overview.mode === 'mock' ? (
+					<Stack direction="row" spacing={0.5} alignItems="center">
+						<ScienceOutlined sx={{ fontSize: 14, color: 'warning.dark' }} />
+						<Typography variant="caption" sx={{ color: '#b45309', fontWeight: 500 }}>
+							模拟数据，仅用于联调
+						</Typography>
+					</Stack>
+				) : null}
+			</Stack>
+			<Stack
+				direction="row"
+				spacing={1.75}
+				alignItems="center"
+				sx={{ display: { xs: 'none', sm: 'flex' }, color: 'text.secondary' }}
+			>
+				<Stack direction="row" spacing={0.6} alignItems="center">
+					<Box component="span" sx={{ width: 7, height: 7, borderRadius: '2px', bgcolor: 'success.main' }} />
+					<Typography variant="caption" color="text.secondary">
+						正常 ≥99%
 					</Typography>
 				</Stack>
-			) : null}
+				<Stack direction="row" spacing={0.6} alignItems="center">
+					<Box component="span" sx={{ width: 7, height: 7, borderRadius: '2px', bgcolor: 'warning.main' }} />
+					<Typography variant="caption" color="text.secondary">
+						降级 95–99%
+					</Typography>
+				</Stack>
+				<Stack direction="row" spacing={0.6} alignItems="center">
+					<Box component="span" sx={{ width: 7, height: 7, borderRadius: '2px', bgcolor: 'error.main' }} />
+					<Typography variant="caption" color="text.secondary">
+						故障 &lt;95%
+					</Typography>
+				</Stack>
+			</Stack>
 		</Stack>
 	);
 }

@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import { regionCoordinates } from '../server/src/topology';
 
 type WindowKey = '5h' | '24h' | '7d' | '30d';
 type CheckType = 'head' | 'model' | 'rerank' | 'systemone' | 'decisions';
@@ -248,8 +249,8 @@ function worstStatus(statuses: HealthStatus[]): HealthStatus {
 function regionStats(check: CheckDef, window: WindowKey, nowMs: number, regionId: string) {
 	const series = generateSeries(check, window, nowMs, regionId);
 	const stats = summarize(series);
-	const last = series.series.at(-1);
-	const lastStatus = last ? (last.success_count > 0 ? 'success' : 'failure') : null;
+	const last = generateAdminResults(check, Math.floor(nowMs / 300_000) * 300_000, 1, regionId)[0];
+	const lastStatus = last.success ? 'success' : 'failure';
 	return {
 		status: statusFor(stats.availability, lastStatus, stats.total_count),
 		availability: stats.availability,
@@ -258,8 +259,8 @@ function regionStats(check: CheckDef, window: WindowKey, nowMs: number, regionId
 		avg_latency_ms: averageLatency(series),
 		p95_ms: p95(series),
 		last_status: lastStatus,
-		last_checked_at: last?.ts ?? null,
-		last_latency_ms: last?.avg_latency_ms ?? null,
+		last_checked_at: last.ts,
+		last_latency_ms: last.latency_ms,
 		series,
 	};
 }
@@ -357,8 +358,10 @@ function buildOverview(nowMs: number, window: WindowKey) {
 		generated_at: nowMs,
 		mode: 'mock',
 		window,
+		topology: { target: { label: '硅谷 · 服务目标', lat: 37.3382, lng: -121.8863 }, intervals: { network: 300_000, model: 300_000 } },
 		regions: REGIONS.map((region) => ({
 			...region,
+			coordinates: regionCoordinates(region),
 			status: gatewayRegions.find((item) => item.id === region.id)?.status ?? 'unknown',
 		})),
 		gateway: {
@@ -454,6 +457,27 @@ function generateAdminResults(check: CheckDef, nowMs: number, limit: number, reg
 	return out;
 }
 
+function buildProbeDetail(check: CheckDef, region: string, window: WindowKey, nowMs: number) {
+	const from = nowMs - WINDOW_MS[window];
+	const bucketMs = BUCKET_MS[window];
+	const rows = generateAdminResults(check, nowMs, Math.floor(WINDOW_MS[window] / 300_000) + 1, region);
+	const quantile = (values: number[], p: number) => values.length ? [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1] : null;
+	const successes = rows.filter((row) => row.success);
+	const latencies = successes.map((row) => row.latency_ms);
+	const buckets = new Map<number, number[]>();
+	for (const row of successes) { const ts = Math.floor(row.ts / bucketMs) * bucketMs; const values = buckets.get(ts) ?? []; values.push(row.latency_ms); buckets.set(ts, values); }
+	const series = [];
+	for (let ts = Math.floor(from / bucketMs) * bucketMs; ts <= nowMs; ts += bucketMs) {
+		const values = buckets.get(ts) ?? [];
+		series.push({ ts, sample_count: values.length, p95_ms: quantile(values, .95), p99_ms: quantile(values, .99) });
+	}
+	return { check_id: check.id, region, source: 'mock', window, from, to: nowMs, bucket_ms: bucketMs,
+		total_count: rows.length, success_count: successes.length, availability: successes.length / rows.length,
+		sample_count: latencies.length, p95_ms: quantile(latencies, .95), p99_ms: quantile(latencies, .99), series,
+		history: rows.slice(0, 24).map(({ ts, success, status_code, latency_ms }) => ({ ts, success, status_code, latency_ms })),
+	};
+}
+
 export function mockApiPlugin(): Plugin {
 	return {
 		name: 'router-status-mock-api',
@@ -468,6 +492,13 @@ export function mockApiPlugin(): Plugin {
 				if (req.method === 'GET' && url.pathname === '/api/public/overview') {
 					const window = getWindowKey(url.searchParams.get('window')) ?? '5h';
 					return sendJson(res, buildOverview(nowMs, window));
+				}
+				if (req.method === 'GET' && url.pathname === '/api/public/probe-detail') {
+					const check = resolveCheck(url);
+					const region = url.searchParams.get('region') ?? '';
+					const window = getWindowKey(url.searchParams.get('window')) ?? '5h';
+					if (!check || !REGIONS.some((item) => item.id === region)) return sendJson(res, { error: 'Invalid check or region' }, 400);
+					return sendJson(res, buildProbeDetail(check, region, window, nowMs));
 				}
 				if (req.method === 'GET' && url.pathname === '/api/public/summary') {
 					return sendJson(res, buildSummary(nowMs));

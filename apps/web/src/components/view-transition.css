@@ -1,0 +1,124 @@
+.view-transition-content[aria-busy='true'] {
+	cursor: progress;
+}
+.view-transition {
+	position: fixed;
+	inset: 0;
+	width: 100vw;
+	height: 100dvh;
+	z-index: 10000;
+	overflow: hidden;
+	touch-action: none;
+	background: #070d18;
+}
+.view-transition-hold {
+	position: absolute;
+	inset: 0;
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: fill;
+	pointer-events: none;
+}
+.view-transition-grid {
+	position: relative;
+	width: 100%;
+	height: 100%;
+}
+.view-transition-cell {
+	position: absolute;
+	width: var(--tile-size);
+	height: var(--tile-size);
+	perspective: var(--perspective);
+}
+.view-transition-tile {
+	position: relative;
+	width: 100%;
+	height: 100%;
+	transform-style: preserve-3d;
+	will-change: transform;
+}
+.view-transition-face {
+	position: absolute;
+	inset: -0.35px;
+	backface-visibility: hidden;
+	-webkit-backface-visibility: hidden;
+	transform: translateZ(0.02px);
+}
+.view-transition-image {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+.view-transition-face::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: rgb(0 0 0 / calc(1 - var(--shade, 1)));
+}
+.view-transition-back {
+	transform: rotateY(180deg) translateZ(0.02px);
+}
+.view-transition-tile[data-face='front'] .view-transition-back,
+.view-transition-tile[data-face='back'] .view-transition-face:not(.view-transition-back) {
+	visibility: hidden;
+}
+.view-mode-switch {
+	position: fixed;
+	top: max(12px, env(safe-area-inset-top));
+	right: max(12px, calc((100vw - 1800px) / 2 + 28px));
+	z-index: 10001;
+	display: flex;
+	gap: 2px;
+	box-sizing: border-box;
+	width: 120px;
+	height: 36px;
+	padding: 3px;
+	border: 1px solid #dbe4f0;
+	border-radius: 10px;
+	background: #e8eef7;
+	color: #475569;
+	font: 650 12px/1.5 var(--status-sans, sans-serif);
+}
+.view-mode-switch button {
+	flex: 1;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+.view-mode-switch button[aria-pressed='true'] {
+	background: #fff;
+	color: #0f172a;
+	box-shadow: 0 1px 3px #0f172a1a;
+}
+.view-mode-switch button:focus-visible {
+	outline: 2px solid #60a5fa;
+	outline-offset: 2px;
+}
+.view-mode-switch button:disabled {
+	cursor: progress;
+}
+.view-mode-switch[data-mode='3d'] {
+	border-color: #ffffff25;
+	background: #0b1020;
+	color: #a1a9b5;
+}
+.view-mode-switch[data-mode='3d'] button[aria-pressed='true'] {
+	background: #ffffff16;
+	color: #fff;
+}
+@media (min-width: 600px) {
+	.view-mode-switch {
+		right: max(20px, calc((100vw - 1800px) / 2 + 28px));
+	}
+}
+@media (min-width: 900px) {
+	.view-mode-switch {
+		right: max(28px, calc((100vw - 1800px) / 2 + 28px));
+	}
+}

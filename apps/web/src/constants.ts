@@ -40,28 +40,44 @@ export const STATUS_LABELS: Record<HealthStatus, string> = {
 };
 
 export const STATUS_COLORS: Record<HealthStatus, string> = {
-	operational: '#19845e',
-	degraded: '#b77712',
-	outage: '#d04444',
-	maintenance: '#66758c',
-	unknown: '#aab6c8',
+	operational: '#059669',
+	degraded: '#d97706',
+	outage: '#dc2626',
+	maintenance: '#475569',
+	unknown: '#94a3b8',
 };
 
 export const STATUS_BACKGROUNDS: Record<HealthStatus, string> = {
-	operational: '#edf8f2',
-	degraded: '#fff8e8',
-	outage: '#fff1f1',
-	maintenance: '#f1f4f8',
-	unknown: '#f5f7fb',
+	operational: '#ecfdf5',
+	degraded: '#fffbeb',
+	outage: '#fef2f2',
+	maintenance: '#f1f5f9',
+	unknown: '#f8fafc',
+};
+
+export const STATUS_BORDERS: Record<HealthStatus, string> = {
+	operational: 'rgba(16, 185, 129, 0.24)',
+	degraded: 'rgba(245, 158, 11, 0.28)',
+	outage: 'rgba(239, 68, 68, 0.26)',
+	maintenance: 'rgba(100, 116, 139, 0.22)',
+	unknown: 'rgba(148, 163, 184, 0.22)',
+};
+
+export const TYPE_STYLES: Record<CheckType, { color: string; bg: string; border: string }> = {
+	head: { color: '#2563eb', bg: '#eff6ff', border: 'rgba(37, 99, 235, 0.18)' },
+	model: { color: '#2563eb', bg: '#eff6ff', border: 'rgba(37, 99, 235, 0.18)' },
+	rerank: { color: '#7c3aed', bg: '#f5f3ff', border: 'rgba(124, 58, 237, 0.18)' },
+	decisions: { color: '#0891b2', bg: '#ecfeff', border: 'rgba(8, 145, 178, 0.2)' },
+	systemone: { color: '#4f46e5', bg: '#eef2ff', border: 'rgba(79, 70, 229, 0.18)' },
 };
 
 export const LATENCY_THRESHOLDS = { good: 100, elevated: 300 };
 
 export function latencyColor(value: number | null): string {
-	if (value === null) return '#66758c';
-	if (value < LATENCY_THRESHOLDS.good) return '#19845e';
-	if (value < LATENCY_THRESHOLDS.elevated) return '#b77712';
-	return '#d04444';
+	if (value === null) return '#64748b';
+	if (value < LATENCY_THRESHOLDS.good) return '#059669';
+	if (value < LATENCY_THRESHOLDS.elevated) return '#d97706';
+	return '#dc2626';
 }
 
 export function availabilityStatus(availability: number | null, total: number): HealthStatus {
