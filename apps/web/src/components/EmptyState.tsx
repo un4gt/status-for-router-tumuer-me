@@ -1,33 +1,32 @@
 import { Box, Stack, Typography } from '@mui/material';
 import type { ReactNode } from 'react';
+import { radius, v } from '../design/tokens';
 
-export function EmptyState({ icon, title, description }: { icon: ReactNode; title: string; description?: string }) {
+export function EmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description?: string; action?: ReactNode }) {
 	return (
-		<Stack direction="row" alignItems="center" justifyContent="center" spacing={1.5} sx={{ px: 2, py: 3 }}>
+		<Stack alignItems="center" justifyContent="center" spacing={1.25} sx={{ px: 2, py: 5, textAlign: 'center' }}>
 			<Box
 				sx={{
-					width: 44,
-					height: 44,
+					width: 40,
+					height: 40,
 					display: 'grid',
 					placeItems: 'center',
-					bgcolor: '#eef2f8',
-					color: 'text.secondary',
-					borderRadius: '14px',
-					flexShrink: 0,
+					bgcolor: v('surface2'),
+					color: v('text3'),
+					borderRadius: `${radius.block}px`,
 				}}
 			>
 				{icon}
 			</Box>
-			<Stack spacing={0.25} sx={{ maxWidth: 520, minWidth: 0 }}>
-				<Typography variant="body2" fontWeight={600}>
-					{title}
+			<Typography variant="body1" fontWeight={600}>
+				{title}
+			</Typography>
+			{description ? (
+				<Typography variant="body2" sx={{ color: v('text2'), maxWidth: 460 }}>
+					{description}
 				</Typography>
-				{description ? (
-					<Typography variant="caption" color="text.secondary">
-						{description}
-					</Typography>
-				) : null}
-			</Stack>
+			) : null}
+			{action}
 		</Stack>
 	);
 }

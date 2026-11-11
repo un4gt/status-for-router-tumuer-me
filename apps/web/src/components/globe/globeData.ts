@@ -1,8 +1,11 @@
-import type { Coordinates, HealthStatus, OverviewResponse, RegionInfo, RegionStats } from '../../api';
+import type { CheckType, Coordinates, HealthStatus, OverviewResponse, RegionInfo, RegionStats } from '../../api';
+import { TYPE_LABELS } from '../../constants';
+import { SCENE_STATUS } from '../../design/tokens';
+import { formatLatency } from '../../format';
 
 export type Layer = 'both' | 'network' | 'model';
 export type Signal = { status: HealthStatus; latency: number | null; stale: boolean };
-export type ProbeLink = { checkId: string; label: string; layer: Exclude<Layer, 'both'>; signal: Signal };
+export type ProbeLink = { checkId: string; label: string; model?: string; type?: CheckType; layer: Exclude<Layer, 'both'>; signal: Signal };
 export type GlobeNode = Coordinates & { id: string; label: string; code: string; checks: ProbeLink[]; status: HealthStatus };
 export type GlobeArc = {
 	checkId: string;
@@ -17,16 +20,10 @@ export type GlobeArc = {
 	altitude: number;
 	signal: Signal;
 };
-export const COLORS: Record<HealthStatus, string> = {
-	operational: '#55e6b1',
-	degraded: '#ffc768',
-	outage: '#ff657d',
-	unknown: '#7d91a9',
-	maintenance: '#9c9af2',
-};
+export const COLORS: Record<HealthStatus, string> = SCENE_STATUS;
 export const LABELS: Record<HealthStatus, string> = {
 	operational: '正常',
-	degraded: '降级 / 高延迟',
+	degraded: '降级或较慢',
 	outage: '故障',
 	unknown: '无新数据',
 	maintenance: '维护',
@@ -69,7 +66,7 @@ export function buildGlobeData(overview: OverviewResponse, layer: Layer, now: nu
 		...overview.gateway.endpoints.map((item) => ({ ...item, label: `${item.method} ${item.path}`, layer: 'network' as const })),
 		...overview.models
 			.filter((item) => item.enabled)
-			.map((item) => ({ ...item, label: `${item.model} · ${item.type}`, layer: 'model' as const })),
+			.map((item) => ({ ...item, label: `${item.model} · ${TYPE_LABELS[item.type]}`, layer: 'model' as const })),
 	];
 	const nodes: GlobeNode[] = [];
 	const unmapped: RegionInfo[] = [];
@@ -82,6 +79,8 @@ export function buildGlobeData(overview: OverviewResponse, layer: Layer, now: nu
 		const links: ProbeLink[] = checks.map((check) => ({
 			checkId: check.id,
 			label: check.label,
+			type: 'type' in check ? check.type : undefined,
+			model: 'model' in check ? check.model : undefined,
 			layer: check.layer,
 			signal: signalFor(check.regions[region.id], check.layer, overview.topology.intervals[check.layer], now),
 		}));
@@ -125,6 +124,5 @@ export function buildGlobeData(overview: OverviewResponse, layer: Layer, now: nu
 	return { nodes, arcs, unmapped };
 }
 
-export function latencyLabel(value: number | null | undefined) {
-	return value == null ? '—' : value >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${Math.round(value)} ms`;
-}
+/** Kept for existing callers; same rule as the 2D view. */
+export const latencyLabel = formatLatency;

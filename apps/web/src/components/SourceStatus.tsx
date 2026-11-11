@@ -1,102 +1,67 @@
 import { Box, Stack, Tooltip, Typography } from '@mui/material';
-import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
-import CheckCircleOutlineRounded from '@mui/icons-material/CheckCircleOutlineRounded';
-import ScienceOutlined from '@mui/icons-material/ScienceOutlined';
 import type { OverviewResponse, SourceStatus } from '../api';
-import { formatAgoShort } from '../format';
+import { SOURCE_LABELS } from '../constants';
+import { size, v } from '../design/tokens';
+import { formatAgoShort, formatDateTime } from '../format';
 
-const LABELS: Record<string, string> = {
-	globalping: 'Globalping',
-	cloudprobe: '云函数拨测',
-	mock: 'Mock 数据',
-	direct: '本站直连',
-};
-
-function SourceItem({ name, source }: { name: string; source: SourceStatus }) {
-	const hasError = Boolean(source.last_error);
-	const statusColor = !source.configured ? 'text.secondary' : hasError ? 'error.main' : 'success.main';
+function SourceItem({ name, source, now }: { name: string; source: SourceStatus; now: number }) {
+	const tone = !source.configured ? v('noneFill') : source.last_error ? v('warnFill') : v('okFill');
+	const text = !source.configured ? '未配置' : source.last_sync_at ? `${formatAgoShort(source.last_sync_at, now)}同步` : '等待首次同步';
 	return (
 		<Tooltip
-			arrow
 			title={
-				<Box sx={{ maxWidth: 420, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-					{source.configured ? (source.last_sync_at ? `最近同步：${new Date(source.last_sync_at).toLocaleString('zh-CN')}` : '尚未同步') : '未配置拨测函数'}
-					{source.last_error ? `\n错误：${source.last_error}` : ''}
-					{source.last_warning ? `\n提示：${source.last_warning}` : ''}
+				<Box sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+					{source.last_sync_at ? `最近同步：${formatDateTime(source.last_sync_at)}` : '尚未同步'}
+					{source.last_error ? '\n部分请求失败；失败的地区记为“无数据”，不计入故障。' : ''}
 				</Box>
 			}
 		>
-			<Stack direction="row" spacing={0.6} alignItems="center" sx={{ minWidth: 0 }}>
-				<Box component="span" sx={{ color: statusColor, display: 'inline-flex' }}>
-					{hasError ? <ErrorOutlineRounded sx={{ fontSize: 14 }} /> : <CheckCircleOutlineRounded sx={{ fontSize: 14 }} />}
-				</Box>
-				<Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-					{LABELS[name] ?? name}
-					{source.configured
-						? source.last_sync_at
-							? ` · ${formatAgoShort(source.last_sync_at)}`
-							: ' · 待同步'
-						: ' · 未配置'}
+			<Stack direction="row" spacing={0.75} alignItems="center" tabIndex={0} sx={{ minWidth: 0, borderRadius: 1 }}>
+				<Box component="span" aria-hidden sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: tone, flexShrink: 0 }} />
+				<Typography component="span" sx={{ fontSize: size.xs, color: v('text3'), whiteSpace: 'nowrap' }}>
+					{SOURCE_LABELS[name] ?? name}
+					<Box component="span" sx={{ color: v('text3'), opacity: 0.8 }}>
+						{' · '}
+						{text}
+					</Box>
 				</Typography>
 			</Stack>
 		</Tooltip>
 	);
 }
 
-export function SourceStatusBar({ overview }: { overview: OverviewResponse }) {
-	const names =
-		overview.mode === 'mock'
-			? ['mock']
-			: overview.mode === 'direct'
-				? ['direct']
-				: ['globalping', 'cloudprobe'];
+const LEGEND = [
+	{ tone: 'okFill', label: '全部成功', tall: false },
+	{ tone: 'warnFill', label: '少量失败', tall: true },
+	{ tone: 'critFill', label: '大量失败', tall: true },
+	{ tone: 'noneFill', label: '无检测', tall: false },
+	{ tone: 'surface3', label: '未开始', tall: false, short: true },
+] as const;
+
+/** How to read the timeline, and where the numbers come from. */
+export function SourceStatusBar({ overview, now }: { overview: OverviewResponse; now: number }) {
+	const names = overview.mode === 'mock' ? ['mock'] : overview.mode === 'direct' ? ['direct'] : ['globalping', 'cloudprobe'];
 	return (
 		<Stack
-			direction="row"
-			spacing={2}
-			useFlexGap
-			flexWrap="wrap"
-			alignItems="center"
+			component="footer"
+			direction={{ xs: 'column', md: 'row' }}
+			spacing={{ xs: 1.25, md: 3 }}
+			alignItems={{ md: 'center' }}
 			justifyContent="space-between"
-			sx={{ minWidth: 0, pt: 0.25 }}
+			sx={{ px: 2.5, py: 1.5, bgcolor: v('surface2'), borderTop: `1px solid ${v('border')}` }}
 		>
-			<Stack direction="row" spacing={2} useFlexGap flexWrap="wrap" alignItems="center" sx={{ minWidth: 0 }}>
-				{names.map((name) =>
-					overview.sources[name] ? <SourceItem key={name} name={name} source={overview.sources[name]} /> : null,
-				)}
-				{overview.mode === 'mock' ? (
-					<Stack direction="row" spacing={0.5} alignItems="center">
-						<ScienceOutlined sx={{ fontSize: 14, color: 'warning.dark' }} />
-						<Typography variant="caption" sx={{ color: '#b45309', fontWeight: 500 }}>
-							模拟数据，仅用于联调
+			<Stack direction="row" spacing={2.5} useFlexGap flexWrap="wrap" alignItems="center" sx={{ minWidth: 0 }}>
+				{names.map((name) => (overview.sources[name] ? <SourceItem key={name} name={name} source={overview.sources[name]} now={now} /> : null))}
+			</Stack>
+			<Stack direction="row" spacing={1.75} useFlexGap flexWrap="wrap" alignItems="center" aria-label="时间线图例">
+				{LEGEND.map((item) => (
+					<Stack key={item.label} direction="row" spacing={0.75} alignItems="center">
+						<Box component="span" aria-hidden sx={{ width: 4, height: 'short' in item ? 5 : item.tall ? 14 : 9, borderRadius: '1px', bgcolor: v(item.tone) }} />
+						<Typography component="span" sx={{ fontSize: size.xs, color: v('text3'), whiteSpace: 'nowrap' }}>
+							{item.label}
 						</Typography>
 					</Stack>
-				) : null}
-			</Stack>
-			<Stack
-				direction="row"
-				spacing={1.75}
-				alignItems="center"
-				sx={{ display: { xs: 'none', sm: 'flex' }, color: 'text.secondary' }}
-			>
-				<Stack direction="row" spacing={0.6} alignItems="center">
-					<Box component="span" sx={{ width: 7, height: 7, borderRadius: '2px', bgcolor: 'success.main' }} />
-					<Typography variant="caption" color="text.secondary">
-						正常 ≥99%
-					</Typography>
-				</Stack>
-				<Stack direction="row" spacing={0.6} alignItems="center">
-					<Box component="span" sx={{ width: 7, height: 7, borderRadius: '2px', bgcolor: 'warning.main' }} />
-					<Typography variant="caption" color="text.secondary">
-						降级 95–99%
-					</Typography>
-				</Stack>
-				<Stack direction="row" spacing={0.6} alignItems="center">
-					<Box component="span" sx={{ width: 7, height: 7, borderRadius: '2px', bgcolor: 'error.main' }} />
-					<Typography variant="caption" color="text.secondary">
-						故障 &lt;95%
-					</Typography>
-				</Stack>
+				))}
 			</Stack>
 		</Stack>
 	);

@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import type { OverviewResponse, WindowKey } from '../../api';
-import { WINDOWS } from '../../constants';
+import { TYPE_LABELS, WINDOWS } from '../../constants';
+import { formatLatency } from '../../format';
+import { ArrowLeftIcon, ArrowRightIcon, CloseIcon, HelpIcon, PauseIcon, PlayIcon, RecenterIcon, RefreshIcon } from './icons';
+import { Globe, Icon } from '../../design/icons';
+import { ModelIcon } from '../ModelIcon';
 import { TIER_COLORS, TIER_LABELS } from '../../latency';
 import GlobeCanvas from './GlobeCanvas';
 import ProbePanel from './ProbePanel';
-import { buildGlobeData, COLORS, LABELS, latencyLabel, type GlobeArc, type Layer } from './globeData';
+import { buildGlobeData, COLORS, LABELS, type GlobeArc, type Layer } from './globeData';
 import './globe.css';
 
 type Props = {
@@ -100,9 +104,9 @@ export default function GlobeStatusView({
 
 			<div className="globe-topline">
 				<div className="globe-title">
-					<h1>全球拨测</h1>
+					<h1>全球检测链路</h1>
 					<span>
-						{data.nodes.length} 个地区 · {models} 个模型同时观测
+						{data.nodes.length} 个地区 · {models} 个模型
 					</span>
 				</div>
 			</div>
@@ -119,11 +123,11 @@ export default function GlobeStatusView({
 					</button>
 					<button aria-pressed={layer === 'network'} onClick={() => setLayer('network')}>
 						<i className="network-dot" />
-						Globalping
+						网关检测
 					</button>
 					<button aria-pressed={layer === 'model'} onClick={() => setLayer('model')}>
 						<i className="model-dot" />
-						模型 HTTP
+						模型检测
 					</button>
 				</div>
 				<div className="globe-latency-legend">
@@ -135,7 +139,7 @@ export default function GlobeStatusView({
 					))}
 				</div>
 				<span className="globe-data-note">
-					{overview?.mode === 'mock' ? '模拟数据' : overview?.mode === 'direct' ? '直连测试数据' : '实时拨测'} ·{' '}
+					{overview?.mode === 'mock' ? '模拟数据' : overview?.mode === 'direct' ? '直连测试数据' : '实时检测'} · 数据时间{' '}
 					{overview ? new Date(overview.generated_at).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}
 					{data.unmapped.length > 0 && <span> · {data.unmapped.length} 个地区无坐标</span>}
 				</span>
@@ -149,14 +153,14 @@ export default function GlobeStatusView({
 						</option>
 					))}
 				</select>
-				<button onClick={reset} title="恢复太平洋全景" aria-label="恢复全景">
-					⌖
+				<button onClick={reset} title="回到全景" aria-label="恢复全景">
+					<RecenterIcon />
 				</button>
-				<button onClick={() => setPaused(!paused)} aria-pressed={paused} aria-label={paused ? '播放动画' : '暂停动画'}>
-					{paused ? '▷' : 'Ⅱ'}
+				<button onClick={() => setPaused(!paused)} aria-pressed={paused} aria-label={paused ? '播放动画' : '暂停动画'} title={paused ? '播放动画' : '暂停动画'}>
+					{paused ? <PlayIcon /> : <PauseIcon />}
 				</button>
-				<button onClick={onRefresh} disabled={refreshing} aria-label="刷新监控数据">
-					↻
+				<button onClick={onRefresh} disabled={refreshing} aria-label="刷新监控数据" title="刷新数据">
+					<RefreshIcon />
 				</button>
 				<button
 					onClick={() => {
@@ -165,8 +169,9 @@ export default function GlobeStatusView({
 					}}
 					aria-expanded={help}
 					aria-label="操作说明"
+					title="操作说明"
 				>
-					?
+					<HelpIcon />
 				</button>
 			</div>
 
@@ -186,19 +191,19 @@ export default function GlobeStatusView({
 							}}
 							aria-label="关闭地区详情"
 						>
-							×
+							<CloseIcon />
 						</button>
 					</div>
 					{check ? (
 						<>
 							<button className="globe-back" onClick={() => setCheckId(null)}>
-								← 全部 {node.checks.length} 个检查项
+								<ArrowLeftIcon /> 全部 {node.checks.length} 项
 							</button>
 							<div className="globe-check-heading">
-								<span>{check.layer === 'network' ? 'Globalping HTTP' : '模型 HTTP'}</span>
+								<span>{check.layer === 'network' ? '网关检测 · Globalping' : '模型检测 · 云函数'}</span>
 								<h3>{check.label}</h3>
 								<p style={{ color: COLORS[check.signal.status] }}>
-									{LABELS[check.signal.status]} · 最近 {latencyLabel(check.signal.latency)}
+									{LABELS[check.signal.status]} · 最近 {formatLatency(check.signal.latency)}
 								</p>
 							</div>
 							<label className="globe-range">
@@ -221,17 +226,20 @@ export default function GlobeStatusView({
 						</>
 					) : (
 						<>
-							<p className="globe-note">所有端点与模型均已在地球上同时显示。点击下面任一检查项查看趋势。</p>
+							<p className="globe-note">点击任一项查看该地区的延迟趋势和最近检测。</p>
 							<div className="globe-check-list">
 								{node.checks.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((item) => (
 									<button key={item.checkId} onClick={() => setCheckId(item.checkId)}>
-										<i style={{ background: COLORS[item.signal.status] }} />
+										<span className="globe-check-icon">
+											{item.model ? <ModelIcon model={item.model} size={24} withTooltip={false} /> : <Icon icon={Globe} size={16} />}
+											<i style={{ background: COLORS[item.signal.status] }} />
+										</span>
 										<span>
-											<small>{item.layer === 'network' ? 'Globalping' : '模型 HTTP'}</small>
+											<small>{item.layer === 'network' ? '网关' : item.type ? TYPE_LABELS[item.type] : '模型'}</small>
 											<strong>{item.label}</strong>
 										</span>
 										<span className="globe-check-value" style={{ color: COLORS[item.signal.status] }}>
-											{latencyLabel(item.signal.latency)}
+											{formatLatency(item.signal.latency)}
 											<small>{LABELS[item.signal.status]}</small>
 										</span>
 									</button>
@@ -241,7 +249,7 @@ export default function GlobeStatusView({
 							{node.checks.length > pageSize && (
 								<div className="globe-pagination">
 									<button disabled={!currentPage} onClick={() => setPage(currentPage - 1)} aria-label="上一页检查项">
-										←
+										<ArrowLeftIcon />
 									</button>
 									<span>
 										{currentPage + 1} / {Math.ceil(node.checks.length / pageSize)}
@@ -251,7 +259,7 @@ export default function GlobeStatusView({
 										onClick={() => setPage(currentPage + 1)}
 										aria-label="下一页检查项"
 									>
-										→
+										<ArrowRightIcon />
 									</button>
 								</div>
 							)}
@@ -265,29 +273,19 @@ export default function GlobeStatusView({
 					<div className="globe-detail-heading">
 						<h2>操作说明</h2>
 						<button onClick={() => setHelp(false)} aria-label="关闭说明">
-							×
+							<CloseIcon />
 						</button>
 					</div>
-					<p>
-						左键 / 中键拖动旋转 · Shift＋拖动或右键平移 ·
-						Ctrl＋拖动或滚轮缩放。单击节点查看该地区所有模型；悬停飞线查看模型名，单击直达该链路详情。
-					</p>
-					<p>低层飞线为 Globalping HTTP，高层为各模型真实请求。所有启用模型同时显示，互不混算；同城探测显示在节点详情中。</p>
-					<p>
-						飞线按请求延迟分级：小于 800ms 绿色、小于 2s 黄色、小于 10s 红色，10s
-						及以上或无新数据为灰色；请求失败至少标红。弧线高度用来区分检查项，不代表真实路由。
-					</p>
-					<p>
-						正常链路保留完整底线，亮段由探测节点流向目标，耗时越高移动越慢；故障和无新数据以断线显示并停止流动。底部按钮控制播放与暂停。Globalping
-						是 HTTP 耗时，不是 ICMP RTT，也不推测丢包率。
-					</p>
-					<p>
-						地球获得焦点后：数字键 1 / 3 / 7 切换前 / 右 / 顶视图，Ctrl 切换反向；5 切换正交投影，9 反向，Home 恢复全景，方向键旋转，＋/−
-						缩放，H 隐藏标签，Space 暂停，R 刷新，[ / ] 切换地区，. 聚焦，/ 局部视图。
-					</p>
-					<a href="https://www.figma.com/make/iO1ad5wy1hFhojTQ2dRyet/Polish-2D-and-3D-Status-Views" target="_blank" rel="noreferrer">
-						Figma Make 设计来源
-					</a>
+					<dl className="globe-help-list">
+						<dt>怎么看</dt>
+						<dd>每条飞线是一个地区到服务目标的一次检测。低层是网关检测，高层是各模型请求；线的高度只用来区分检测项，不代表真实路由。</dd>
+						<dt>颜色</dt>
+						<dd>按请求耗时分级：绿色 &lt; 800 ms，黄色 &lt; 2 s，红色 &lt; 10 s，灰色为 ≥ 10 s 或没有新数据。请求失败至少显示为红色并断开。</dd>
+						<dt>鼠标</dt>
+						<dd>拖动旋转，滚轮缩放，Shift + 拖动或右键平移；点击地区查看明细，悬停飞线查看模型名。</dd>
+						<dt>键盘</dt>
+						<dd>Home 回到全景，方向键旋转，+ / − 缩放，[ / ] 切换地区，Space 暂停，R 刷新，H 隐藏标签。</dd>
+					</dl>
 				</aside>
 			)}
 		</div>

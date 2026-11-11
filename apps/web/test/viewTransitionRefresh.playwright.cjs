@@ -107,7 +107,7 @@ async (page) => {
 	failure.release();
 	await until(() => failure.done);
 	await idle();
-	await page.getByRole('alert').filter({ hasText: '状态暂时无法更新' }).waitFor();
+	await page.getByRole('alert').filter({ hasText: '暂时无法获取最新状态' }).waitFor();
 	assert(await displayed() === success.request.revision, 'A failure discarded a newer successful snapshot');
 	scenarios.push({ stage: 'success-then-failure-in-one-transition', latestRevision: success.request.revision, passed: true });
 	const recovered = {};

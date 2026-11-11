@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { TIER_COLORS, type Tier } from '../../latency';
-import earthDay from './assets/earth-day.jpg';
-import earthNight from './assets/figma-earth-night.jpg';
-import earthWater from './assets/earth-water.png';
+import earthDay from './assets/earth-day.webp';
+import earthNight from './assets/earth-night.webp';
+import earthWater from './assets/earth-water.webp';
 
 export type LayerFilter = 'all' | 'gateway' | 'model';
 export type AxisView = 'front' | 'back' | 'right' | 'left' | 'top' | 'bottom';
@@ -225,7 +225,7 @@ export class GlobeScene {
 		this.canvas = canvas;
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
 		this.renderer.setPixelRatio(viewport.pixelRatio);
-		this.renderer.setClearColor(0x000011, 1);
+		this.renderer.setClearColor(0x05060f, 1);
 		this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
 		const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);

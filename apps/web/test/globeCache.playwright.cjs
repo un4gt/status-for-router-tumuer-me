@@ -42,7 +42,9 @@ async (page) => {
 				await tab.getByRole('button', { name: mode === '3d' ? '3D 地球' : '2D', exact: true }).click();
 				await idle();
 			};
-			if (scenario === 'early-entry') await switchTo('3d');
+			// Phones do not prewarm the globe (it costs ~1 MB); they load it on first entry.
+			const enterFirst = scenario === 'early-entry' || mobile;
+			if (enterFirst) await switchTo('3d');
 			if (scenario === 'no-webgl') {
 				await tab.waitForTimeout(1200);
 				if (await tab.locator('[role=alert]').count()) throw new Error('Background warmup disturbed 2D');
@@ -51,7 +53,7 @@ async (page) => {
 			} else {
 				await tab.locator('.globe-canvas canvas[data-renderer=main]').waitFor({ state: 'attached' });
 				await tab.evaluate(() => { window.__cachedCanvas = document.querySelector('.globe-canvas canvas'); });
-				if (scenario !== 'early-entry') await switchTo('3d');
+				if (!enterFirst) await switchTo('3d');
 				if (scenario === 'desktop-reuse') {
 					for (let index = 0; index < 11; index++) {
 						await switchTo(index % 2 ? '3d' : '2d');
@@ -87,7 +89,7 @@ async (page) => {
 					await context.route('**/api/public/probe-detail*', () => {});
 					await tab.evaluate(() => { window.__cacheTest.timeoutShort = true; });
 					await tab.locator('.globe-check-list button').first().click();
-					await tab.getByText('地区详情暂时无法加载。').waitFor();
+					await tab.getByText('这个地区的检测明细暂时无法读取。').waitFor();
 				} else if (scenario === 'context-loss') {
 					await tab.evaluate(() => window.__cacheTest.contexts[0].getExtension('WEBGL_lose_context').loseContext());
 					await tab.waitForFunction(() => document.querySelector('.view-mode-switch').dataset.mode === '2d' && document.querySelector('[role=alert]'));

@@ -1,31 +1,26 @@
 /**
- * Request-latency tiers shared by the 2D and 3D views.
- * < 800ms fast (green) · < 2s slow (yellow) · < 10s bad (red) · ≥ 10s / no response timeout (grey)
+ * Request-latency tiers for the 3D flight lines.
+ * < 800ms fast · < 2s slow · < 10s bad · ≥ 10s / no response timeout.
+ * Colours come from the scene palette so 2D and 3D read as one system.
  */
+import { SCENE_STATUS } from './design/tokens';
+
 export type Tier = 'fast' | 'slow' | 'bad' | 'timeout';
 
 export const TIER_RANK: Record<Tier, number> = { fast: 0, slow: 1, bad: 2, timeout: 3 };
 
 export const TIER_COLORS: Record<Tier, string> = {
-	fast: '#34d399',
-	slow: '#fbbf24',
-	bad: '#f87171',
-	timeout: '#94a3b8',
-};
-
-/** Darker variants for text on light (2D) surfaces. */
-export const TIER_TEXT: Record<Tier, string> = {
-	fast: '#334155',
-	slow: '#d97706',
-	bad: '#dc2626',
-	timeout: '#64748b',
+	fast: SCENE_STATUS.operational,
+	slow: SCENE_STATUS.degraded,
+	bad: SCENE_STATUS.outage,
+	timeout: SCENE_STATUS.unknown,
 };
 
 export const TIER_LABELS: Record<Tier, string> = {
-	fast: '< 800ms',
-	slow: '< 2s',
-	bad: '< 10s',
-	timeout: '≥ 10s',
+	fast: '< 800 ms',
+	slow: '< 2 s',
+	bad: '< 10 s',
+	timeout: '≥ 10 s 或无数据',
 };
 
 export function latencyTier(ms: number | null, failed = false): Tier {

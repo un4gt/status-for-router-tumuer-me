@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { fetchProbeDetail, type ProbeDetail, type WindowKey } from '../../api';
-import { latencyLabel } from './globeData';
+import { formatLatency as latencyLabel } from '../../format';
+import { ArrowLeftIcon, ArrowRightIcon } from './icons';
 
 const timeLabel = (time: number, date = false) =>
 	new Date(time).toLocaleString(
@@ -42,17 +43,17 @@ function PercentileChart({ detail }: { detail: ProbeDetail }) {
 			aria-label={`成功请求 P95 ${latencyLabel(detail.p95_ms)}，P99 ${latencyLabel(detail.p99_ms)}。缺失样本处断开。`}
 		>
 			{[0, 0.5, 1].map((ratio) => (
-				<line key={ratio} x1={left} x2={width - left} y1={y(max * ratio)} y2={y(max * ratio)} stroke="#26364b" strokeDasharray="3 5" />
+				<line key={ratio} x1={left} x2={width - left} y1={y(max * ratio)} y2={y(max * ratio)} stroke="var(--g-line)" />
 			))}
 			<text x={left} y={12}>
 				{latencyLabel(max)}
 			</text>
-			<path d={path('p99_ms')} fill="none" stroke="#b4a0ff" strokeWidth="1.8" strokeDasharray="4 3" />
-			<path d={path('p95_ms')} fill="none" stroke="#74c9ff" strokeWidth="2" />
+			<path d={path('p99_ms')} fill="none" stroke="var(--g-text-3)" strokeWidth="1.6" strokeDasharray="4 3" />
+			<path d={path('p95_ms')} fill="none" stroke="var(--g-brand)" strokeWidth="2" />
 			{detail.series
 				.filter((point) => point.p95_ms !== null)
 				.map((point) => (
-					<circle key={point.ts} cx={x(point.ts)} cy={y(point.p95_ms!)} r="2" fill="#74c9ff">
+					<circle key={point.ts} cx={x(point.ts)} cy={y(point.p95_ms!)} r="2.5" fill="var(--g-brand)">
 						<title>
 							{timeLabel(point.ts, true)} · P95 {latencyLabel(point.p95_ms)} · P99 {latencyLabel(point.p99_ms)} · n={point.sample_count}
 						</title>
@@ -106,7 +107,7 @@ export default function ProbePanel({
 				if (!disposed) setState({ key, data });
 			})
 			.catch(() => {
-				if (!disposed) setState({ key, error: '地区详情暂时无法加载。' });
+				if (!disposed) setState({ key, error: '这个地区的检测明细暂时无法读取。' });
 			})
 			.finally(() => window.clearTimeout(timer));
 		return () => {
@@ -115,7 +116,7 @@ export default function ProbePanel({
 			controller.abort();
 		};
 	}, [key]);
-	if (!checkId) return <p className="globe-empty">尚未配置{source === 'network' ? '网络端点' : '模型'}。</p>;
+	if (!checkId) return <p className="globe-empty">尚未配置{source === 'network' ? '网关检测' : '模型检测'}。</p>;
 	if (current?.error)
 		return (
 			<div role="alert" className="globe-empty">
@@ -126,7 +127,7 @@ export default function ProbePanel({
 	if (!current?.data)
 		return (
 			<p role="status" className="globe-empty">
-				正在读取地区样本…
+				正在读取检测明细…
 			</p>
 		);
 	const detail = current.data;
@@ -156,21 +157,20 @@ export default function ProbePanel({
 					延迟趋势
 				</button>
 				<button aria-pressed={tab === 'history'} onClick={() => setTab('history')}>
-					检查历史 <span>{detail.history.length}</span>
+					最近检测 <span>{detail.history.length}</span>
 				</button>
 			</div>
 			{tab === 'chart' ? (
 				<>
 					<PercentileChart detail={detail} />
 					<p className="globe-note">
-						成功耗时样本 n={detail.sample_count} · 每桶 {Math.round(detail.bucket_ms / 60000)} 分钟。P95/P99
-						为原始样本最近秩分位数，小样本可能重合；失败不计入耗时分位数。
+						只统计成功请求的耗时（{detail.sample_count} 个样本，每 {Math.round(detail.bucket_ms / 60000)} 分钟一组）；样本少时 P95 与 P99 可能重合。
 					</p>
 				</>
 			) : (
 				<>
 					<table className="globe-history">
-						<caption>最近 24 次检查（所选时间段内）</caption>
+						<caption>所选时间段内最近 {detail.history.length} 次检测</caption>
 						<thead>
 							<tr>
 								<th>时间</th>
@@ -183,17 +183,17 @@ export default function ProbePanel({
 								<tr key={`${row.ts}-${index}`}>
 									<td title={timeLabel(row.ts, true)}>{timeLabel(row.ts)}</td>
 									<td className={row.success ? 'text-healthy' : 'text-outage'}>
-										{row.success ? '成功' : '失败'} <small>{row.status_code ?? '超时/连接'}</small>
+										{row.success ? '成功' : '失败'} <small>{row.status_code ?? '超时或连接失败'}</small>
 									</td>
 									<td>{latencyLabel(row.latency_ms)}</td>
 								</tr>
 							))}
 						</tbody>
 					</table>
-					{!detail.history.length && <p className="globe-note">没有检查记录。</p>}
+					{!detail.history.length && <p className="globe-note">没有检测记录。</p>}
 					<div className="globe-pagination">
 						<button disabled={!currentPage} onClick={() => setPage(currentPage - 1)} aria-label="上一页历史">
-							←
+							<ArrowLeftIcon />
 						</button>
 						<span>
 							{currentPage + 1} / {Math.max(1, Math.ceil(detail.history.length / pageSize))}
@@ -203,7 +203,7 @@ export default function ProbePanel({
 							onClick={() => setPage(currentPage + 1)}
 							aria-label="下一页历史"
 						>
-							→
+							<ArrowRightIcon />
 						</button>
 					</div>
 				</>

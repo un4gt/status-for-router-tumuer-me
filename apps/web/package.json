@@ -9,11 +9,14 @@
 		"typecheck": "bun --bun tsc --noEmit"
 	},
 	"dependencies": {
+		"@emotion/cache": "^11.14.0",
 		"@emotion/react": "^11.13.3",
 		"@emotion/styled": "^11.13.0",
-		"@mui/icons-material": "^6.1.8",
+		"@fontsource-variable/inter": "^5.2.8",
+		"@fontsource-variable/jetbrains-mono": "^5.2.8",
+		"@lobehub/icons-static-svg": "1.101.0",
 		"@mui/material": "^6.1.8",
-		"@mui/x-charts": "^7.22.2",
+		"lucide-react": "1.63.0",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1",
 		"react-globe.gl": "^2.38.0",

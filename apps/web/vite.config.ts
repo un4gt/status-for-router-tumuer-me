@@ -20,9 +20,26 @@ export default defineConfig(({ command, mode }) => {
 			proxy: useMock
 				? undefined
 				: {
-						'/api': 'http://127.0.0.1:8787',
+						'/api': process.env.API_PROXY_TARGET || 'http://127.0.0.1:8787',
 					},
 		},
 		preview: { host: '0.0.0.0' },
+		build: {
+			// Lab logos must stay separate files so they load only when that lab is on screen.
+			assetsInlineLimit: (file: string) => (file.includes('@lobehub/icons-static-svg') ? false : undefined),
+			rollupOptions: {
+				output: {
+					// Long-lived vendor chunks: a UI change no longer invalidates React/MUI in visitors' caches.
+					manualChunks(id) {
+						if (!id.includes('node_modules') || id.includes('@lobehub/icons-static-svg')) return undefined;
+						if (/[\\/](three|three-globe|react-globe\.gl|globe\.gl|kapsule|d3-|h3-js|earcut)/.test(id)) return undefined;
+						if (/@mui[\\/]icons-material/.test(id)) return 'icons';
+						if (/@mui|@emotion|@popperjs|react-transition-group|stylis/.test(id)) return 'mui';
+						if (/[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(id)) return 'react';
+						return 'vendor';
+					},
+				},
+			},
+		},
 	};
 });

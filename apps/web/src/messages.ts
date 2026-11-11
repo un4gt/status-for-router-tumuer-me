@@ -5,10 +5,10 @@ const errorMessages = new Map([
 	['Already exists', '该模型检查项已存在。'],
 	['Not found', '该检查项已不存在，请刷新页面。'],
 	['Model must contain 1–200 characters', '模型名称需为 1–200 个字符。'],
-	['Each model needs a valid name and an explicit model/rerank type', '请填写模型名称并选择探测类型。'],
-	['Each model needs a valid name and an explicit probe type', '请填写模型名称并选择探测类型。'],
+	['Each model needs a valid name and an explicit model/rerank type', '请填写模型名称并选择检测类型。'],
+	['Each model needs a valid name and an explicit probe type', '请填写模型名称并选择检测类型。'],
 	['Missing enabled', '请选择启用状态。'],
-	['A check run is already in progress', '已有探测正在进行，请稍后重试。'],
+	['A check run is already in progress', '已有一轮检测正在进行，请稍后重试。'],
 ]);
 
 export function getUserError(error: unknown, fallback = '操作失败，请稍后重试。'): string {
