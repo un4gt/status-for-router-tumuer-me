@@ -24,5 +24,5 @@ The MCP texture resources were incomplete (about 35 KB each, invalid WebGL uploa
 Working local textures were restored from three-globe example assets:
 - earth-day.jpg: https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-blue-marble.jpg
 - earth-water.png: https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-water.png
-- figma-earth-night.jpg: identical to the existing earth-night.jpg above.
+- *.webp: WebP re-encodes of the textures above (day/night quality 80, water lossless), used at runtime to cut ~2.6 MB of downloads to ~1 MB.
 These replacements are not claimed to be byte-identical to Figma's textures.

@@ -9,7 +9,7 @@
 	z-index: 10000;
 	overflow: hidden;
 	touch-action: none;
-	background: #070d18;
+	background: var(--bg);
 }
 .view-transition-hold {
 	position: absolute;
@@ -63,62 +63,71 @@
 .view-transition-tile[data-face='back'] .view-transition-face:not(.view-transition-back) {
 	visibility: hidden;
 }
+/* The 2D/3D switch stays fixed so it never moves during the tile flip; the
+   header reserves --mode-switch-slot for it. */
+:root {
+	--mode-switch-slot: 96px;
+}
 .view-mode-switch {
 	position: fixed;
 	top: max(12px, env(safe-area-inset-top));
-	right: max(12px, calc((100vw - 1800px) / 2 + 28px));
+	right: max(16px, env(safe-area-inset-right), calc((100vw - 1440px) / 2 + 32px));
 	z-index: 10001;
 	display: flex;
 	gap: 2px;
 	box-sizing: border-box;
-	width: 120px;
-	height: 36px;
+	width: 88px;
+	height: 32px;
 	padding: 3px;
-	border: 1px solid #dbe4f0;
-	border-radius: 10px;
-	background: #e8eef7;
-	color: #475569;
-	font: 650 12px/1.5 var(--status-sans, sans-serif);
+	border: 0;
+	border-radius: 8px;
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--hairline);
+	color: var(--text-2);
+	font: 600 12px/1 var(--font-sans, sans-serif);
 }
 .view-mode-switch button {
 	flex: 1;
 	min-width: 0;
 	padding: 0;
 	border: 0;
-	border-radius: 6px;
+	border-radius: 5px;
 	background: transparent;
 	color: inherit;
 	font: inherit;
 	cursor: pointer;
 }
+.view-mode-switch button:hover:not([aria-pressed='true']) {
+	color: var(--text-1);
+}
 .view-mode-switch button[aria-pressed='true'] {
-	background: #fff;
-	color: #0f172a;
-	box-shadow: 0 1px 3px #0f172a1a;
+	background: var(--surface);
+	color: var(--text-1);
+	box-shadow: var(--shadow-control);
 }
 .view-mode-switch button:focus-visible {
-	outline: 2px solid #60a5fa;
+	outline: 2px solid var(--focus);
 	outline-offset: 2px;
 }
 .view-mode-switch button:disabled {
 	cursor: progress;
 }
 .view-mode-switch[data-mode='3d'] {
-	border-color: #ffffff25;
-	background: #0b1020;
-	color: #a1a9b5;
+	box-shadow: inset 0 0 0 1px #ffffff24;
+	background: #0c0e1acc;
+	color: #b3b8ce;
+	backdrop-filter: blur(8px);
 }
 .view-mode-switch[data-mode='3d'] button[aria-pressed='true'] {
-	background: #ffffff16;
+	background: #ffffff1f;
 	color: #fff;
+	box-shadow: none;
 }
-@media (min-width: 600px) {
-	.view-mode-switch {
-		right: max(20px, calc((100vw - 1800px) / 2 + 28px));
-	}
+.view-mode-switch[data-covered] {
+	visibility: hidden;
 }
-@media (min-width: 900px) {
+@media (max-width: 899.95px) {
 	.view-mode-switch {
-		right: max(28px, calc((100vw - 1800px) / 2 + 28px));
+		right: max(16px, env(safe-area-inset-right));
 	}
 }

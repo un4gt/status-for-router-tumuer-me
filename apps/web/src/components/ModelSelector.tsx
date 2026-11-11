@@ -20,12 +20,8 @@ import {
 	TextField,
 	Typography,
 } from '@mui/material';
-import CloudSyncOutlined from '@mui/icons-material/CloudSyncOutlined';
-import CloudDownloadOutlined from '@mui/icons-material/CloudDownloadOutlined';
-import SearchRounded from '@mui/icons-material/SearchRounded';
-import SyncRounded from '@mui/icons-material/SyncRounded';
-import DoneRounded from '@mui/icons-material/DoneRounded';
 import { EmptyState } from './EmptyState';
+import { ModelIcon } from './ModelIcon';
 import { SectionHeader } from './SectionHeader';
 import { getUserError } from '../messages';
 import { TYPE_LABELS } from '../constants';
@@ -38,6 +34,7 @@ import {
 	type ModelCandidate,
 	type ModelType,
 } from '../api';
+import { Icon, Check, CloudDownload, RefreshCw, Search } from '../design/icons';
 
 type Check = AdminChecksResponse['checks'][number];
 type Row = { key: string; model: string; type: ModelType | ''; selected: boolean; candidate?: ModelCandidate; existing: boolean };
@@ -137,11 +134,11 @@ export function ModelSelector({
 			saved = true;
 			onChecksChange((await adminChecks()).checks);
 			await adminRun();
-			setNotice('已保存，探测完成。');
+			setNotice('已保存，检测已完成。');
 			await onRunComplete();
 		} catch (e) {
 			if (saved && (e as { status?: number })?.status === 409) {
-				setNotice('已保存，将在下一轮探测时生效。');
+				setNotice('已保存，将在下一轮检测时生效。');
 			} else {
 				if (saved) setNotice('选择已保存。');
 				handleError(e);
@@ -156,14 +153,14 @@ export function ModelSelector({
 		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 			<Stack spacing={2.5}>
 				<SectionHeader
-					icon={<CloudSyncOutlined fontSize="small" />}
+					icon={<Icon icon={RefreshCw} size={18} />}
 					title="同步模型"
 					action={
 						<Button
 							variant="outlined"
 							disabled={busy}
 							onClick={sync}
-							startIcon={working === 'sync' ? <CircularProgress size={18} color="inherit" /> : <SyncRounded />}
+							startIcon={working === 'sync' ? <CircularProgress size={14} color="inherit" /> : <Icon icon={RefreshCw} size={16} />}
 						>
 							{working === 'sync' ? '正在同步…' : '同步模型列表'}
 						</Button>
@@ -172,8 +169,8 @@ export function ModelSelector({
 				{error && <Alert severity="error">{error}</Alert>}
 				{notice && <Alert severity="info">{notice}</Alert>}
 				{rows.length === 0 ? (
-					<Box sx={{ border: '1px dashed', borderColor: 'divider', borderRadius: '12px', bgcolor: '#fafbfd' }}>
-						<EmptyState icon={<CloudDownloadOutlined />} title={synced ? '暂无可用模型' : '尚未同步模型'} />
+					<Box sx={{ border: '1px dashed', borderColor: 'divider', borderRadius: '12px', bgcolor: 'var(--surface-2)' }}>
+						<EmptyState icon={<Icon icon={CloudDownload} size={18} />} title={synced ? '暂无可用模型' : '尚未同步模型'} />
 					</Box>
 				) : (
 					<>
@@ -189,7 +186,7 @@ export function ModelSelector({
 									input: {
 										startAdornment: (
 											<InputAdornment position="start">
-												<SearchRounded fontSize="small" sx={{ color: 'text.secondary' }} />
+												<Icon icon={Search} size={16} style={{ color: 'var(--text-3)' }} />
 											</InputAdornment>
 										),
 									},
@@ -200,14 +197,14 @@ export function ModelSelector({
 							</Typography>
 						</Stack>
 						<TableContainer sx={{ maxHeight: 380 }}>
-							<Table size="small" stickyHeader aria-label="选择要探测的模型" sx={{ minWidth: visible.length ? 520 : undefined }}>
+							<Table size="small" stickyHeader aria-label="选择要检测的模型" sx={{ minWidth: visible.length ? 520 : undefined }}>
 								<TableHead sx={{ display: visible.length ? undefined : 'none' }}>
 									<TableRow>
 										<TableCell padding="checkbox" sx={{ px: 2 }}>
 											选择
 										</TableCell>
 										<TableCell>模型</TableCell>
-										<TableCell sx={{ minWidth: 180 }}>探测类型</TableCell>
+										<TableCell sx={{ minWidth: 180 }}>检测类型</TableCell>
 									</TableRow>
 								</TableHead>
 								<TableBody>
@@ -218,17 +215,17 @@ export function ModelSelector({
 													checked={row.selected}
 													disabled={busy || !row.type || (!!row.candidate?.unsupported && !row.selected)}
 													onChange={(_, checked) => update(row.key, { selected: checked })}
-													inputProps={{ 'aria-label': `探测 ${row.model}` }}
+													inputProps={{ 'aria-label': `检测 ${row.model}` }}
 												/>
 											</TableCell>
 											<TableCell sx={{ overflowWrap: 'anywhere' }}>
 												<Stack spacing={0.5} alignItems="flex-start">
-													<Typography
-														variant="body2"
-														sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', fontSize: '0.8125rem' }}
-													>
-														{row.model}
-													</Typography>
+													<Stack direction="row" spacing={1.25} alignItems="center">
+														<ModelIcon model={row.model} size={22} />
+														<Typography variant="body2" sx={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem' }}>
+															{row.model}
+														</Typography>
+													</Stack>
 													{row.candidate?.unsupported ? (
 														<Chip size="small" label="暂不支持此类型" />
 													) : !row.type ? (
@@ -257,7 +254,7 @@ export function ModelSelector({
 													displayEmpty
 													value={row.type}
 													disabled={busy || row.candidate?.unsupported}
-													inputProps={{ 'aria-label': `${row.model} 的探测类型` }}
+													inputProps={{ 'aria-label': `${row.model} 的检测类型` }}
 													onChange={(event) => update(row.key, { type: event.target.value as ModelType })}
 												>
 													<MenuItem value="" disabled>
@@ -274,7 +271,7 @@ export function ModelSelector({
 									{visible.length === 0 && (
 										<TableRow>
 											<TableCell colSpan={3}>
-												<EmptyState icon={<SearchRounded />} title="没有匹配的模型" />
+												<EmptyState icon={<Icon icon={Search} size={18} />} title="没有匹配的模型" />
 											</TableCell>
 										</TableRow>
 									)}
@@ -295,9 +292,9 @@ export function ModelSelector({
 								variant="contained"
 								disabled={busy || selected.some((row) => !row.type)}
 								onClick={save}
-								startIcon={working === 'save' ? <CircularProgress size={18} color="inherit" /> : <DoneRounded />}
+								startIcon={working === 'save' ? <CircularProgress size={14} color="inherit" /> : <Icon icon={Check} size={16} />}
 							>
-								{working === 'save' ? '保存并探测中…' : '保存并开始探测'}
+								{working === 'save' ? '正在保存并检测…' : '保存并开始检测'}
 							</Button>
 						</Stack>
 					</>

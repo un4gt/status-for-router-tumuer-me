@@ -4,7 +4,8 @@ import { latencyTier, TIER_COLORS, worstTier } from '../../latency';
 import { useViewTransition } from '../ViewTransition';
 import type { SceneLink, ViewState } from './GlobeScene';
 import { GlobeRenderer } from './GlobeRenderer';
-import { latencyLabel, type GlobeArc, type GlobeNode } from './globeData';
+import { formatLatency as latencyLabel } from '../../format';
+import type { GlobeArc, GlobeNode } from './globeData';
 
 type Props = {
 	active: boolean;

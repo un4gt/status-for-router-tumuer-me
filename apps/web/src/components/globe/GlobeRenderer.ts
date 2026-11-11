@@ -25,7 +25,7 @@ export class GlobeRenderer extends GlobeScene {
 		this.host = host;
 		this.surface = canvas;
 		canvas.tabIndex = 0;
-		canvas.setAttribute('aria-label', '全球拨测 3D 地球；拖动旋转，双指或滚轮缩放');
+		canvas.setAttribute('aria-label', '全球检测链路 3D 地球；拖动旋转，双指或滚轮缩放');
 		canvas.style.cssText = 'display:block;width:100%;height:100%;touch-action:none';
 		host.replaceChildren(canvas);
 		this.onLabels = (labels) => this.applyLabels(labels);

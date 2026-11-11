@@ -1,183 +1,88 @@
-import { Box, useTheme } from '@mui/material';
-import { useId, useMemo, useState } from 'react';
+import { Box } from '@mui/material';
+import { useId, useMemo } from 'react';
 import type { SeriesPoint } from '../api';
+import { v } from '../design/tokens';
 import { formatLatency } from '../format';
 
-const WIDTH = 120;
-const HEIGHT = 34;
-const PAD_X = 4;
-const PAD_Y = 5;
+const WIDTH = 160;
+const HEIGHT = 36;
+const PAD = 3;
 
-function buildSmoothPath(coords: Array<{ x: number; y: number }>): string {
-	if (coords.length === 0) return '';
-	if (coords.length === 1) return `M${coords[0].x.toFixed(2)},${coords[0].y.toFixed(2)}`;
-	let d = `M${coords[0].x.toFixed(2)},${coords[0].y.toFixed(2)}`;
-	for (let i = 0; i < coords.length - 1; i++) {
-		const curr = coords[i];
-		const next = coords[i + 1];
-		const cpx = (curr.x + next.x) / 2;
-		d += ` C${cpx.toFixed(2)},${curr.y.toFixed(2)} ${cpx.toFixed(2)},${next.y.toFixed(2)} ${next.x.toFixed(2)},${next.y.toFixed(2)}`;
+/** Monotone cubic (Fritsch–Carlson) so the curve never overshoots the data. */
+function monotonePath(points: Array<{ x: number; y: number }>): string {
+	const n = points.length;
+	if (n < 2) return '';
+	const dx = points.slice(1).map((p, i) => p.x - points[i].x);
+	const slope = points.slice(1).map((p, i) => (p.y - points[i].y) / (dx[i] || 1));
+	const tangent = points.map((_, i) => {
+		if (i === 0) return slope[0];
+		if (i === n - 1) return slope[n - 2];
+		return slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2;
+	});
+	let d = `M${points[0].x.toFixed(2)},${points[0].y.toFixed(2)}`;
+	for (let i = 0; i < n - 1; i++) {
+		const h = dx[i] / 3;
+		d += ` C${(points[i].x + h).toFixed(2)},${(points[i].y + tangent[i] * h).toFixed(2)} ${(points[i + 1].x - h).toFixed(2)},${(points[i + 1].y - tangent[i + 1] * h).toFixed(2)} ${points[i + 1].x.toFixed(2)},${points[i + 1].y.toFixed(2)}`;
 	}
 	return d;
 }
 
+/**
+ * A calm latency trend: values are lightly smoothed (3-point average) so probe
+ * jitter does not read as alarm, while the endpoint marks the true latest value.
+ */
 export function Sparkline({
 	points,
 	color,
-	height = 34,
+	height = HEIGHT,
 	label = '延迟趋势',
+	quiet = false,
 }: {
 	points: SeriesPoint[];
 	color: string;
 	height?: number;
 	label?: string;
+	/** Healthy regions draw in a neutral ink; colour is reserved for problems. */
+	quiet?: boolean;
 }) {
-	const theme = useTheme();
 	const gradientId = useId().replace(/:/g, '');
-	const [hovered, setHovered] = useState<number | null>(null);
-
-	const values = useMemo(
-		() =>
-			points
-				.map((point, index) => ({ point, index }))
-				.filter((item) => item.point.avg_latency_ms !== null),
-		[points],
-	);
-
 	const geometry = useMemo(() => {
-		if (values.length === 0) return null;
-		const latencies = values.map((item) => item.point.avg_latency_ms as number);
-		const min = Math.min(...latencies);
-		const max = Math.max(...latencies);
-		const sorted = [...latencies].sort((a, b) => a - b);
-		const p92 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.92))] ?? max;
-		const normalSpan = Math.max(p92 - min, Math.max(min * 0.15, 4));
-		const hasExtremeSpike = max > p92 + normalSpan * 1.8;
-		const visualMax = hasExtremeSpike ? p92 + normalSpan * 0.65 : Math.max(max, min + normalSpan);
-		const visualMin = Math.max(0, min - normalSpan * 0.18);
-		const span = visualMax - visualMin || 1;
-		const innerWidth = WIDTH - PAD_X * 2;
-		const innerHeight = HEIGHT - PAD_Y * 2;
-
-		const coords = values.map((item, position) => {
-			const x = values.length === 1 ? WIDTH - PAD_X : PAD_X + (position / (values.length - 1)) * innerWidth;
-			const rawVal = item.point.avg_latency_ms as number;
-			const normalized =
-				rawVal <= visualMax
-					? (rawVal - visualMin) / span
-					: Math.min(1.06, 0.92 + Math.min(0.14, ((rawVal - visualMax) / (max - visualMax || 1)) * 0.14));
-			const y = HEIGHT - PAD_Y - Math.max(0, normalized) * innerHeight;
-			return { x, y, point: item.point, originalIndex: item.index };
+		const raw = points.filter((point) => point.avg_latency_ms !== null).map((point) => point.avg_latency_ms as number);
+		if (raw.length < 2) return null;
+		const smoothed = raw.map((_, i) => {
+			const window = raw.slice(Math.max(0, i - 1), i + 2);
+			return window.reduce((sum, value) => sum + value, 0) / window.length;
 		});
-		const line = buildSmoothPath(coords);
-		const firstX = coords[0].x.toFixed(2);
-		const lastX = coords.at(-1)!.x.toFixed(2);
-		const area = `${line} L${lastX},${HEIGHT} L${firstX},${HEIGHT} Z`;
-		return { coords, line, area, min, max };
-	}, [values]);
+		const sorted = [...smoothed].sort((a, b) => a - b);
+		const min = sorted[0];
+		const ceiling = Math.max(sorted[Math.floor(sorted.length * 0.96)] ?? sorted.at(-1)!, min * 1.25, min + 8);
+		const floor = Math.max(0, min - (ceiling - min) * 0.15);
+		const coords = smoothed.map((value, index) => ({
+			x: PAD + (index / (smoothed.length - 1)) * (WIDTH - PAD * 2),
+			y: HEIGHT - PAD - ((Math.min(value, ceiling) - floor) / (ceiling - floor || 1)) * (HEIGHT - PAD * 2),
+		}));
+		const line = monotonePath(coords);
+		return { coords, line, area: `${line} L${coords.at(-1)!.x},${HEIGHT} L${coords[0].x},${HEIGHT} Z`, latest: raw.at(-1)!, min: Math.min(...raw), max: Math.max(...raw) };
+	}, [points]);
 
-	const latest = values.at(-1)?.point.avg_latency_ms ?? null;
-	const summary =
-		geometry === null
-			? `${label}：暂无数据`
-			: `${label}：最近 ${formatLatency(latest)}，最低 ${formatLatency(geometry.min)}，最高 ${formatLatency(geometry.max)}`;
-
-	const active =
-		hovered !== null ? (geometry?.coords.find((coord) => coord.originalIndex === hovered) ?? null) : null;
-
+	const summary = geometry
+		? `${label}：最近 ${formatLatency(geometry.latest)}，最低 ${formatLatency(geometry.min)}，最高 ${formatLatency(geometry.max)}`
+		: `${label}：暂无数据`;
+	if (!geometry) return <Box role="img" aria-label={summary} sx={{ height, borderRadius: 1, bgcolor: v('surface2') }} />;
+	const stroke = quiet ? v('text3') : color;
+	const end = geometry.coords.at(-1)!;
 	return (
-		<Box
-			sx={{ position: 'relative', width: '100%', height, minWidth: 0 }}
-			onMouseLeave={() => setHovered(null)}
-			onMouseMove={(event) => {
-				if (!geometry || geometry.coords.length === 0) return;
-				const rect = event.currentTarget.getBoundingClientRect();
-				const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-				const nearest = geometry.coords.reduce((best, coord) =>
-					Math.abs(coord.x / WIDTH - ratio) < Math.abs(best.x / WIDTH - ratio) ? coord : best,
-				);
-				setHovered(nearest.originalIndex);
-			}}
-		>
-			{geometry === null ? (
-				<Box
-					aria-label={summary}
-					role="img"
-					sx={{ height: '100%', borderRadius: 1, border: '1px dashed', borderColor: 'divider', bgcolor: 'action.hover' }}
-				/>
-			) : (
-				<Box
-					component="svg"
-					role="img"
-					aria-label={summary}
-					viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-					preserveAspectRatio="none"
-					sx={{ display: 'block', width: '100%', height: '100%', overflow: 'visible' }}
-				>
-					<title>{summary}</title>
-					<defs>
-						<linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-							<stop offset="0%" stopColor={color} stopOpacity={0.22} />
-							<stop offset="100%" stopColor={color} stopOpacity={0} />
-						</linearGradient>
-					</defs>
-					<path d={geometry.area} fill={`url(#${gradientId})`} />
-					<path
-						d={geometry.line}
-						fill="none"
-						stroke={color}
-						strokeWidth={2}
-						strokeLinecap="round"
-						strokeLinejoin="round"
-						vectorEffect="non-scaling-stroke"
-					/>
-					{active ? (
-						<>
-							<line
-								x1={active.x}
-								y1={0}
-								x2={active.x}
-								y2={HEIGHT}
-								stroke={theme.palette.divider}
-								strokeWidth={1}
-								vectorEffect="non-scaling-stroke"
-							/>
-							<circle cx={active.x} cy={active.y} r={2.4} fill={theme.palette.background.paper} stroke={color} strokeWidth={2} />
-						</>
-					) : null}
-					<circle
-						cx={geometry.coords.at(-1)!.x}
-						cy={geometry.coords.at(-1)!.y}
-						r={2.4}
-						fill={theme.palette.background.paper}
-						stroke={color}
-						strokeWidth={2}
-						vectorEffect="non-scaling-stroke"
-					/>
-				</Box>
-			)}
-			{active ? (
-				<Box
-					sx={{
-						position: 'absolute',
-						left: `${(active.x / WIDTH) * 100}%`,
-						top: `${(active.y / HEIGHT) * 100}%`,
-						transform: 'translate(-50%, -135%)',
-						px: 0.75,
-						py: 0.25,
-						borderRadius: 1,
-						bgcolor: 'rgba(29,43,67,0.92)',
-						color: '#fff',
-						fontSize: '0.6875rem',
-						fontVariantNumeric: 'tabular-nums',
-						whiteSpace: 'nowrap',
-						pointerEvents: 'none',
-						zIndex: 2,
-					}}
-				>
-					{formatLatency(active.point.avg_latency_ms)}
-				</Box>
-			) : null}
+		<Box component="svg" role="img" aria-label={summary} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" sx={{ display: 'block', width: '100%', height, overflow: 'visible' }}>
+			<title>{summary}</title>
+			<defs>
+				<linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+					<stop offset="0%" stopColor={stroke} stopOpacity={quiet ? 0.08 : 0.16} />
+					<stop offset="100%" stopColor={stroke} stopOpacity={0} />
+				</linearGradient>
+			</defs>
+			<path d={geometry.area} fill={`url(#${gradientId})`} />
+			<path d={geometry.line} fill="none" stroke={stroke} strokeOpacity={quiet ? 0.7 : 1} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+			<circle cx={end.x} cy={end.y} r={2.25} fill={quiet ? v('text2') : color} stroke={v('surface')} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
 		</Box>
 	);
 }

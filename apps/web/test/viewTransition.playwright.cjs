@@ -27,7 +27,9 @@ async (page) => {
 		await page.emulateMedia({ reducedMotion });
 		await page.goto('http://127.0.0.1:5173/');
 		await page.locator('[data-item-index]').first().waitFor();
-		await page.locator('.globe-canvas canvas[data-renderer]').waitFor({ state: 'attached' });
+		// Large screens prewarm the globe in the background; phones load it on first entry,
+		// which this test measures as part of the first transition.
+		if (viewport.width >= 1024) await page.locator('.globe-canvas canvas[data-renderer]').waitFor({ state: 'attached' });
 		await page.evaluate(() => {
 			window.__modeSwitch = document.querySelector('.view-mode-switch');
 			window.__modeButtons = [...window.__modeSwitch.querySelectorAll('button')];

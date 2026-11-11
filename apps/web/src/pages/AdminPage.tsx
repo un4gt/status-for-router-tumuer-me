@@ -24,19 +24,8 @@ import {
 	TextField,
 	Typography,
 } from '@mui/material';
-import AddRounded from '@mui/icons-material/AddRounded';
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
-import CloudSyncOutlined from '@mui/icons-material/CloudSyncOutlined';
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
-import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
-import HistoryRounded from '@mui/icons-material/HistoryRounded';
-import LockOutlined from '@mui/icons-material/LockOutlined';
-import LoginRounded from '@mui/icons-material/LoginRounded';
-import LogoutRounded from '@mui/icons-material/LogoutRounded';
-import PlaylistAddCheckRounded from '@mui/icons-material/PlaylistAddCheckRounded';
-import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
-import SyncRounded from '@mui/icons-material/SyncRounded';
 import { useEffect, useMemo, useState } from 'react';
+import Pagination from '@mui/material/Pagination';
 import {
 	adminChecks,
 	adminCreateCheck,
@@ -52,20 +41,20 @@ import {
 	type ModelType,
 } from '../api';
 import { formatAgoShort, formatDateTime } from '../format';
-import { MODEL_TYPES, TYPE_LABELS } from '../constants';
+import { MODEL_TYPES, SOURCE_LABELS, TYPE_LABELS } from '../constants';
+import { v } from '../design/tokens';
+import { TypeTag } from '../components/TypeTag';
 import { getUserError } from '../messages';
+import { ModelIcon } from '../components/ModelIcon';
 import { ModelSelector } from '../components/ModelSelector';
 import { EmptyState } from '../components/EmptyState';
 import { SectionHeader } from '../components/SectionHeader';
+import { Icon, Check, History, ListChecks, Lock, LogIn, LogOut, Play, Plus, RefreshCw, Trash2, X } from '../design/icons';
 
 type Filter = { type: 'head' } | { type: ModelType; model: string };
 
-const TYPE_STYLES: Record<string, { bgcolor: string; color: string }> = {
-	model: { bgcolor: 'primary.light', color: 'primary.main' },
-	rerank: { bgcolor: '#f7f2ff', color: '#8056b3' },
-	decisions: { bgcolor: '#eef8f2', color: '#19845e' },
-	systemone: { bgcolor: '#fff8e8', color: '#9a6b12' },
-};
+const PAGE_SIZE = 20;
+const MODE_LABELS: Record<string, string> = { live: '正式检测', mock: '模拟数据', direct: '本站直连' };
 
 export function AdminPage() {
 	const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
@@ -82,6 +71,8 @@ export function AdminPage() {
 	const [rowsLoading, setRowsLoading] = useState(false);
 
 	const [errorDialog, setErrorDialog] = useState<{ title: string; body: string } | null>(null);
+	const [pendingDelete, setPendingDelete] = useState<{ id: string; model: string } | null>(null);
+	const [page, setPage] = useState(1);
 
 	const [checks, setChecks] = useState<any[]>([]);
 	const [checksError, setChecksError] = useState<string | null>(null);
@@ -184,7 +175,7 @@ export function AdminPage() {
 					setLoggedIn(false);
 					return;
 				}
-				setRowsError(getUserError(e, '探测记录加载失败，请稍后重试。'));
+				setRowsError(getUserError(e, '检测记录加载失败，请稍后重试。'));
 			})
 			.finally(() => setRowsLoading(false));
 	}, [loggedIn, queryParams]);
@@ -192,6 +183,9 @@ export function AdminPage() {
 	const orderedRows = useMemo(() => {
 		return [...rows].sort((a, b) => (b.ts || 0) - (a.ts || 0));
 	}, [rows]);
+	const pageCount = Math.max(1, Math.ceil(orderedRows.length / PAGE_SIZE));
+	const pageRows = orderedRows.slice((Math.min(page, pageCount) - 1) * PAGE_SIZE, Math.min(page, pageCount) * PAGE_SIZE);
+	useEffect(() => setPage(1), [queryParams]);
 
 	if (loggedIn === null) {
 		return (
@@ -238,9 +232,9 @@ export function AdminPage() {
 								mb: 0.5,
 							}}
 						>
-							<LockOutlined />
+							<Icon icon={Lock} size={18} />
 						</Box>
-						<Typography component="h1" variant="h5" sx={{ fontSize: '1.4rem' }}>
+						<Typography component="h1" variant="h1">
 							登录管理控制台
 						</Typography>
 					</Stack>
@@ -267,7 +261,7 @@ export function AdminPage() {
 						variant="contained"
 						size="large"
 						disabled={busy}
-						startIcon={busy ? <CircularProgress size={18} color="inherit" /> : <LoginRounded />}
+						startIcon={busy ? <CircularProgress size={14} color="inherit" /> : <Icon icon={LogIn} size={16} />}
 					>
 						{busy ? '正在登录…' : '登录'}
 					</Button>
@@ -280,7 +274,7 @@ export function AdminPage() {
 		<Stack spacing={3} sx={{ minWidth: 0 }}>
 			<Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
 				<Box>
-					<Typography component="h1" variant="h4">
+					<Typography component="h1" variant="h1">
 						监控管理
 					</Typography>
 				</Box>
@@ -290,7 +284,7 @@ export function AdminPage() {
 						color="inherit"
 						size="small"
 						disabled={busy}
-						startIcon={<LogoutRounded />}
+						startIcon={<Icon icon={LogOut} size={16} />}
 						onClick={async () => {
 							setBusy(true);
 							try {
@@ -309,14 +303,14 @@ export function AdminPage() {
 			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 				<Stack spacing={2}>
 					<SectionHeader
-						icon={<CloudSyncOutlined fontSize="small" />}
+						icon={<Icon icon={RefreshCw} size={18} />}
 						title="数据源状态"
 						action={
 							<Button
 								variant="outlined"
 								size="small"
 								disabled={busy || syncing || sourcesLoading}
-								startIcon={syncing ? <CircularProgress size={16} color="inherit" /> : <SyncRounded />}
+								startIcon={syncing ? <CircularProgress size={14} color="inherit" /> : <Icon icon={RefreshCw} size={16} />}
 								onClick={async () => {
 									setSyncing(true);
 									setSourcesError(null);
@@ -343,7 +337,7 @@ export function AdminPage() {
 					{sources ? (
 						<Stack spacing={1.25}>
 							<Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-								<Chip size="small" variant="outlined" label={`模式：${sources.mode}`} />
+								<Chip size="small" variant="outlined" label={`模式：${MODE_LABELS[sources.mode] ?? sources.mode}`} />
 								<Chip size="small" variant="outlined" label={`地区：${sources.regions.map((region) => region.label).join(' / ')}`} />
 								<Chip
 									size="small"
@@ -356,9 +350,9 @@ export function AdminPage() {
 									}
 									label={
 										sources.mode !== 'live'
-											? '当前模式无需云函数拨测'
+											? '当前模式无需云函数检测'
 											: !sources.sources.cloudprobe?.configured
-												? '云函数拨测未配置'
+												? '云函数检测未配置'
 												: `${sources.regions.filter((region) => region.probeUrl).length}/${sources.regions.length} 个地区已配置`
 									}
 								/>
@@ -377,14 +371,15 @@ export function AdminPage() {
 										sx={{ p: 1.25, border: '1px solid', borderColor: 'divider', borderRadius: '10px' }}
 									>
 										<Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-											<Typography variant="body2" fontWeight={700} sx={{ minWidth: 90 }}>
-												{name === 'globalping' ? 'Globalping' : name === 'cloudprobe' ? '云函数拨测' : name === 'mock' ? 'Mock 数据' : '本站直连'}
+											<Typography variant="body2" fontWeight={600} sx={{ minWidth: 90 }}>
+												{SOURCE_LABELS[name] ?? name}
 											</Typography>
 											<Chip
 												size="small"
 												variant="outlined"
 												color={source.configured ? 'success' : 'default'}
 												label={source.configured ? '已配置' : '未配置'}
+												sx={{ fontWeight: 500 }}
 											/>
 											<Typography variant="caption" color="text.secondary">
 												{source.last_sync_at ? `上次同步：${formatAgoShort(source.last_sync_at)}` : '尚未同步'}
@@ -424,7 +419,7 @@ export function AdminPage() {
 			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 				<Stack spacing={2.5}>
 					<SectionHeader
-						icon={<PlaylistAddCheckRounded fontSize="small" />}
+						icon={<Icon icon={ListChecks} size={18} />}
 						title="模型检查项"
 						action={
 							checksLoading ? (
@@ -445,13 +440,13 @@ export function AdminPage() {
 						direction={{ xs: 'column', sm: 'row' }}
 						spacing={1.5}
 						alignItems={{ sm: 'center' }}
-						sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: '12px' }}
+						sx={{ p: 2, bgcolor: v('surface2'), borderRadius: '10px' }}
 					>
 						<FormControl size="small" sx={{ minWidth: 160 }}>
-							<InputLabel id="new-check-type-label">探测类型</InputLabel>
+							<InputLabel id="new-check-type-label">检测类型</InputLabel>
 							<Select
 								labelId="new-check-type-label"
-								label="探测类型"
+								label="检测类型"
 								value={newCheckType}
 								onChange={(e) => setNewCheckType(e.target.value as ModelType)}
 								disabled={busy}
@@ -473,7 +468,7 @@ export function AdminPage() {
 						/>
 						<Button
 							variant="outlined"
-							startIcon={<AddRounded />}
+							startIcon={<Icon icon={Plus} size={16} />}
 							sx={{ flexShrink: 0, bgcolor: 'background.paper' }}
 							disabled={busy || !newModel.trim()}
 							onClick={async () => {
@@ -513,33 +508,19 @@ export function AdminPage() {
 								{modelChecks.length === 0 ? (
 									<TableRow>
 										<TableCell colSpan={4}>
-											<EmptyState icon={<PlaylistAddCheckRounded />} title={checksLoading ? '正在加载检查项…' : '暂无模型检查项'} />
+											<EmptyState icon={<Icon icon={ListChecks} size={18} />} title={checksLoading ? '正在加载检查项…' : '暂无模型检查项'} />
 										</TableCell>
 									</TableRow>
 								) : (
 									modelChecks.map((c: any) => (
 										<TableRow key={c.id} hover>
 											<TableCell>
-												<Chip
-													size="small"
-													variant="outlined"
-													label={TYPE_LABELS[c.type as ModelType]}
-													sx={{
-														...TYPE_STYLES[c.type],
-														borderColor: 'transparent',
-													}}
-												/>
+												<TypeTag type={c.type as ModelType} />
 											</TableCell>
 											<TableCell>
-												<Stack spacing={0.75} alignItems="flex-start">
-													<Typography
-														variant="body2"
-														sx={{
-															fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-															fontSize: '0.8125rem',
-															overflowWrap: 'anywhere',
-														}}
-													>
+												<Stack direction="row" spacing={1.25} alignItems="center">
+													<ModelIcon model={c.model} size={22} />
+													<Typography variant="body2" sx={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', overflowWrap: 'anywhere' }}>
 														{c.model}
 													</Typography>
 												</Stack>
@@ -575,22 +556,9 @@ export function AdminPage() {
 												<Button
 													size="small"
 													color="error"
-													startIcon={<DeleteOutlineRounded />}
+													startIcon={<Icon icon={Trash2} size={16} />}
 													disabled={busy}
-													onClick={async () => {
-														if (!confirm(`确定删除模型「${c.model}」的检查项吗？该检查项的历史记录也会一并删除。`)) return;
-														setBusy(true);
-														setChecksError(null);
-														try {
-															await adminDeleteCheck(c.id);
-															const r = await adminChecks();
-															setChecks(r.checks);
-														} catch (e: any) {
-															setChecksError(getUserError(e, '删除失败，请稍后重试。'));
-														} finally {
-															setBusy(false);
-														}
-													}}
+													onClick={() => setPendingDelete({ id: c.id, model: c.model })}
 												>
 													删除
 												</Button>
@@ -607,14 +575,14 @@ export function AdminPage() {
 			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 				<Stack spacing={2.5}>
 					<SectionHeader
-						icon={<HistoryRounded fontSize="small" />}
-						title="探测记录"
+						icon={<Icon icon={History} size={18} />}
+						title="检测记录"
 						action={
 							<Button
 								variant="contained"
 								disabled={busy}
-								startIcon={running ? <CircularProgress size={18} color="inherit" /> : <PlayArrowRounded />}
-								title="立即同步 Globalping / 云函数拨测数据"
+								startIcon={running ? <CircularProgress size={14} color="inherit" /> : <Icon icon={Play} size={16} />}
+								title="立即从 Globalping 和云函数拉取一轮检测结果"
 								onClick={async () => {
 									setBusy(true);
 									setRunning(true);
@@ -642,10 +610,10 @@ export function AdminPage() {
 					/>
 					<Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} useFlexGap alignItems={{ md: 'center' }}>
 						<FormControl size="small" sx={{ minWidth: 170 }}>
-							<InputLabel id="type-label">探测类型</InputLabel>
+							<InputLabel id="type-label">检测类型</InputLabel>
 							<Select
 								labelId="type-label"
-								label="探测类型"
+								label="检测类型"
 								value={filter.type}
 								disabled={busy}
 								onChange={(e) => {
@@ -654,7 +622,7 @@ export function AdminPage() {
 									else setFilter({ type: value, model: (checksForType(value)[0]?.model as string) || '' });
 								}}
 							>
-								<MenuItem value="head">HEAD · 主站</MenuItem>
+								<MenuItem value="head">网关（HEAD /）</MenuItem>
 								{MODEL_TYPES.map((type) => (
 									<MenuItem key={type} value={type} disabled={!checksForType(type).length}>
 										{TYPE_LABELS[type]}
@@ -704,10 +672,10 @@ export function AdminPage() {
 					{rowsError ? <Alert severity="error">{rowsError}</Alert> : null}
 
 					<TableContainer>
-						<Table size="small" aria-label="探测记录" sx={{ minWidth: orderedRows.length ? 760 : undefined }}>
+						<Table size="small" aria-label="检测记录" sx={{ minWidth: orderedRows.length ? 760 : undefined }}>
 							<TableHead sx={{ display: orderedRows.length ? undefined : 'none' }}>
 								<TableRow>
-									<TableCell>探测时间</TableCell>
+									<TableCell>检测时间</TableCell>
 									<TableCell>地区</TableCell>
 									<TableCell>结果</TableCell>
 									<TableCell>状态码</TableCell>
@@ -720,18 +688,18 @@ export function AdminPage() {
 									<TableRow>
 										<TableCell colSpan={6}>
 											<Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
-												<CircularProgress size={24} aria-label="正在加载探测记录" />
+												<CircularProgress size={24} aria-label="正在加载检测记录" />
 											</Box>
 										</TableCell>
 									</TableRow>
 								) : orderedRows.length === 0 ? (
 									<TableRow>
 										<TableCell colSpan={6}>
-											<EmptyState icon={<HistoryRounded />} title="暂无探测记录" />
+											<EmptyState icon={<Icon icon={History} size={18} />} title="暂无检测记录" />
 										</TableCell>
 									</TableRow>
 								) : (
-									orderedRows.map((r) => (
+									pageRows.map((r) => (
 										<TableRow key={r.id} hover>
 											<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{formatDateTime(r.ts)}</TableCell>
 											<TableCell sx={{ whiteSpace: 'nowrap' }}>
@@ -746,13 +714,13 @@ export function AdminPage() {
 												<Chip
 													size="small"
 													variant="outlined"
-													icon={Number(r.success) === 1 ? <CheckCircleRounded /> : <ErrorOutlineRounded />}
+													icon={Number(r.success) === 1 ? <Icon icon={Check} size={14} /> : <Icon icon={X} size={14} />}
 													label={Number(r.success) === 1 ? '成功' : '失败'}
 													color={Number(r.success) === 1 ? 'success' : 'error'}
 													sx={{ bgcolor: Number(r.success) === 1 ? 'success.light' : 'error.light', borderColor: 'transparent' }}
 												/>
 											</TableCell>
-											<TableCell sx={{ fontFamily: 'ui-monospace, monospace', color: 'text.secondary' }}>{r.status_code ?? '—'}</TableCell>
+											<TableCell sx={{ fontFamily: 'var(--font-mono)', color: 'text.secondary' }}>{r.status_code ?? '—'}</TableCell>
 											<TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
 												{r.latency_ms ?? '—'}
 												{r.latency_ms != null && (
@@ -776,8 +744,53 @@ export function AdminPage() {
 							</TableBody>
 						</Table>
 					</TableContainer>
+					{orderedRows.length > PAGE_SIZE ? (
+						<Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+							<Typography variant="caption" color="text.secondary">
+								最近 {orderedRows.length} 条，每页 {PAGE_SIZE} 条
+							</Typography>
+							<Pagination size="small" count={pageCount} page={Math.min(page, pageCount)} onChange={(_, value) => setPage(value)} />
+						</Stack>
+					) : null}
 				</Stack>
 			</Paper>
+
+			<Dialog open={!!pendingDelete} onClose={() => setPendingDelete(null)} maxWidth="xs" fullWidth>
+				<DialogTitle>删除这个检查项？</DialogTitle>
+				<DialogContent>
+					<Typography variant="body2">
+						将删除 <Box component="code" sx={{ fontFamily: 'var(--font-mono)' }}>{pendingDelete?.model}</Box> 的检查项和它的全部历史记录，删除后无法恢复。只想暂停检测时，请改用“启用”开关。
+					</Typography>
+				</DialogContent>
+				<DialogActions>
+					<Button variant="outlined" color="inherit" onClick={() => setPendingDelete(null)}>
+						取消
+					</Button>
+					<Button
+						variant="contained"
+						color="error"
+						disabled={busy}
+						onClick={async () => {
+							if (!pendingDelete) return;
+							setBusy(true);
+							setChecksError(null);
+							try {
+								await adminDeleteCheck(pendingDelete.id);
+								const r = await adminChecks();
+								setChecks(r.checks);
+								setPendingDelete(null);
+							} catch (e: any) {
+								setChecksError(getUserError(e, '删除失败，请稍后重试。'));
+								setPendingDelete(null);
+							} finally {
+								setBusy(false);
+							}
+						}}
+					>
+						删除检查项
+					</Button>
+				</DialogActions>
+			</Dialog>
 
 			<Dialog open={!!errorDialog} onClose={() => setErrorDialog(null)} maxWidth="md" fullWidth>
 				<DialogTitle>{errorDialog?.title}</DialogTitle>
@@ -788,8 +801,8 @@ export function AdminPage() {
 						sx={{
 							whiteSpace: 'pre-wrap',
 							overflowWrap: 'anywhere',
-							fontFamily: 'ui-monospace, monospace',
-							bgcolor: '#f8fafc',
+							fontFamily: 'var(--font-mono)',
+							bgcolor: v('surface2'),
 							p: 2,
 							borderRadius: '10px',
 						}}
