@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
+import { saveSelection } from '../src/db';
 import { createScheduler, RunBusyError } from '../src/scheduler';
 import { fixture } from './helpers';
 
@@ -82,6 +83,38 @@ describe('scheduler', () => {
 			callbacks[2]();
 			expect(runs).toHaveLength(3);
 			expect(delays).toHaveLength(3);
+		} finally {
+			await scheduler.stop();
+			timeout.mockRestore();
+			clear.mockRestore();
+		}
+	});
+	test('refresh recalculates the tick after an interval change', async () => {
+		const services = fixture({ checkIntervalSeconds: 300, schedulerTickSeconds: 300 });
+		const clock = Date.parse('2026-10-03T22:59:04+08:00');
+		const callbacks: Array<() => void> = [];
+		const delays: number[] = [];
+		const schedule = ((callback: () => void, delay?: number) => {
+			callbacks.push(callback);
+			delays.push(delay ?? 0);
+			return callbacks.length as unknown as ReturnType<typeof setTimeout>;
+		}) as typeof setTimeout;
+		const timeout = spyOn(globalThis, 'setTimeout').mockImplementation(schedule);
+		const clear = spyOn(globalThis, 'clearTimeout').mockImplementation(() => undefined);
+		const scheduler = createScheduler(
+			services,
+			async () => ({ ok: true, ts: clock, triggeredBy: 'scheduled' as const }),
+			() => clock,
+		);
+		try {
+			scheduler.start();
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			expect(delays).toEqual([56_000]);
+
+			saveSelection(services, [{ model: 'embed', type: 'model' }]);
+			scheduler.refresh();
+			expect(clear).toHaveBeenCalled();
+			expect(delays.at(-1)).toBe(26_000);
 		} finally {
 			await scheduler.stop();
 			timeout.mockRestore();

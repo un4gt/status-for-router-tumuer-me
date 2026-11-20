@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from '../src/app';
-import { listChecks, saveSelection } from '../src/db';
+import { getCheckById, listChecks, saveSelection } from '../src/db';
 import { signJwt } from '../src/jwt';
 import { ModelSyncError } from '../src/models';
 import { createRateLimiter } from '../src/rateLimit';
@@ -115,6 +115,50 @@ describe('HTTP API', () => {
 				.map((row) => row.id),
 		).toEqual(['net:health', 'net:models', 'net:root', 'rerank:selected']);
 		expect((await app.request('/api/admin/checks', { headers })).status).toBe(200);
+	});
+	test('updates single and batch check intervals atomically', async () => {
+		const services = fixture();
+		saveSelection(services, [
+			{ model: 'a', type: 'model' },
+			{ model: 'b', type: 'rerank' },
+		]);
+		const app = createApp(services, createScheduler(services, fakeRun));
+		const cookie = (await login(app)).split(';')[0];
+		const headers = { cookie, 'content-type': 'application/json' };
+		const patch = (body: unknown) => app.request('/api/admin/checks', { method: 'PATCH', headers, body: JSON.stringify(body) });
+		const batch = (body: unknown) => app.request('/api/admin/checks/batch', { method: 'PATCH', headers, body: JSON.stringify(body) });
+
+		expect((await patch({ id: 'model:a', interval_seconds: 300 })).status).toBe(200);
+		expect(getCheckById(services, 'model:a')?.interval_seconds).toBe(300);
+		expect(getCheckById(services, 'model:a')?.enabled).toBe(1);
+
+		expect((await patch({ id: 'model:a', interval_seconds: null })).status).toBe(200);
+		expect(getCheckById(services, 'model:a')?.interval_seconds).toBeNull();
+
+		expect((await patch({ id: 'model:a', enabled: false })).status).toBe(200);
+		expect(getCheckById(services, 'model:a')?.enabled).toBe(0);
+		expect((await patch({ id: 'model:a', enabled: true })).status).toBe(200);
+
+		for (const interval of [29, 604_801, 1.5, '300']) {
+			expect((await patch({ id: 'model:a', interval_seconds: interval })).status).toBe(400);
+			expect(getCheckById(services, 'model:a')?.interval_seconds).toBeNull();
+		}
+		expect((await patch({ id: 'model:a' })).status).toBe(400);
+		expect((await patch({ id: 'net:root', interval_seconds: 300 })).status).toBe(400);
+
+		expect((await batch({ ids: ['model:a', 'rerank:b'], interval_seconds: 900 })).status).toBe(200);
+		expect(getCheckById(services, 'model:a')?.interval_seconds).toBe(900);
+		expect(getCheckById(services, 'rerank:b')?.interval_seconds).toBe(900);
+
+		expect((await batch({ ids: ['model:a', 'model:missing'], interval_seconds: 60 })).status).toBe(404);
+		expect(getCheckById(services, 'model:a')?.interval_seconds).toBe(900);
+		expect((await batch({ ids: ['net:root'], interval_seconds: 60 })).status).toBe(400);
+		expect((await batch({ ids: [], interval_seconds: 60 })).status).toBe(400);
+		expect((await batch({ ids: ['model:a'] })).status).toBe(400);
+		expect((await batch({ ids: ['model:a'], interval_seconds: 60 })).status).toBe(200);
+
+		const sources = await (await app.request('/api/admin/sources', { headers })).json();
+		expect(sources.intervals).toEqual({ network: 300, model: 30 });
 	});
 	test('serves frontend route refreshes while preserving API and missing-asset 404s', async () => {
 		const webRoot = temporaryDirectory();

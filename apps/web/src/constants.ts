@@ -33,3 +33,8 @@ export const SOURCE_LABELS: Record<string, string> = {
 
 /** Thresholds behind the uptime colours; must match the legend copy. */
 export const AVAILABILITY_THRESHOLDS = { degraded: 0.99, outage: 0.95 } as const;
+
+/** Model-check frequency choices; the server accepts any integer second in this range. */
+export const FREQUENCY_PRESETS = [30, 60, 300, 900, 1800, 3600] as const;
+export const MIN_FREQUENCY_SECONDS = 30;
+export const MAX_FREQUENCY_SECONDS = 7 * 24 * 60 * 60;

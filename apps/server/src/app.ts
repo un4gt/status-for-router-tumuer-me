@@ -9,11 +9,13 @@ import {
 	getCheckById,
 	listChecks,
 	saveSelection,
-	setCheckEnabled,
+	setCheckIntervals,
+	updateCheckSettings,
 	type ModelSelection,
 	type ResultRow,
 	type Services,
 } from './db';
+import { effectiveIntervalSeconds, MAX_CHECK_INTERVAL_SECONDS, MIN_CHECK_INTERVAL_SECONDS } from './intervals';
 import { discoverModels, ModelSyncError } from './models';
 import { createRateLimiter } from './rateLimit';
 import { RunBusyError, type Scheduler } from './scheduler';
@@ -27,9 +29,28 @@ const SESSION_COOKIE = 'router_status_session';
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MODEL_TYPES = ['model', 'rerank', 'systemone', 'decisions'] as const;
 const WINDOWS = ['5h', '24h', '7d', '30d'] as const;
+const MAX_BATCH_CHECKS = 500;
+const INTERVAL_ERROR = `Interval must be null or an integer between ${MIN_CHECK_INTERVAL_SECONDS} and ${MAX_CHECK_INTERVAL_SECONDS} seconds`;
 
 function isModelType(value: unknown): value is (typeof MODEL_TYPES)[number] {
 	return typeof value === 'string' && (MODEL_TYPES as readonly string[]).includes(value);
+}
+
+function parseIntervalInput(value: unknown): { ok: true; value: number | null } | { ok: false } {
+	if (value === null) return { ok: true, value: null };
+	if (
+		typeof value === 'number' &&
+		Number.isInteger(value) &&
+		value >= MIN_CHECK_INTERVAL_SECONDS &&
+		value <= MAX_CHECK_INTERVAL_SECONDS
+	) {
+		return { ok: true, value };
+	}
+	return { ok: false };
+}
+
+function hasOwn(body: unknown, key: string): boolean {
+	return Boolean(body) && Object.prototype.hasOwnProperty.call(body, key);
 }
 
 function resolveCheckId(services: Services, c: any): { id?: string; error?: string } {
@@ -135,7 +156,7 @@ export function createApp(
 		const region = resolveRegion(services, c);
 		if (region.error) return c.json({ error: region.error }, 400);
 		const check = resolved.id ? getCheckById(services, resolved.id) : null;
-		const minSeconds = check?.type === 'head' ? config.globalping.intervalSeconds : config.cloudProbe.intervalSeconds;
+		const minSeconds = check ? effectiveIntervalSeconds(services, check) : config.cloudProbe.intervalSeconds;
 		const bucketMs = getBucketMs(window, { minBucketMs: minSeconds * 1000 });
 		return c.json({
 			check_id: resolved.id,
@@ -181,6 +202,7 @@ export function createApp(
 		return c.json({
 			mode: config.monitoringMode,
 			regions: config.regions,
+			intervals: { network: config.globalping.intervalSeconds, model: config.cloudProbe.intervalSeconds },
 			sources: getSources(services),
 		});
 	});
@@ -215,6 +237,7 @@ export function createApp(
 		const id = `${body.type}:${model}`;
 		if (getCheckById(services, id)) return c.json({ error: 'Already exists' }, 409);
 		createCheck(services, { id, type: body.type, model, target: config.routerBaseUrl, enabled: body.enabled === false ? 0 : 1 });
+		scheduler.refresh();
 		return c.json({ ok: true, id });
 	});
 	app.patch('/api/admin/checks', async (c) => {
@@ -225,10 +248,48 @@ export function createApp(
 		if (!check) return c.json({ error: 'Not found' }, 404);
 		if (!isModelType(check.type)) return c.json({ error: 'Only model checks can be modified' }, 400);
 
-		const hasEnabled = typeof body?.enabled === 'boolean';
-		if (!hasEnabled) return c.json({ error: 'Missing enabled' }, 400);
-		setCheckEnabled(services, id, body.enabled);
+		const hasEnabled = hasOwn(body, 'enabled');
+		const hasInterval = hasOwn(body, 'interval_seconds');
+		if (!hasEnabled && !hasInterval) return c.json({ error: 'Missing enabled or interval_seconds' }, 400);
+		if (hasEnabled && typeof body.enabled !== 'boolean') return c.json({ error: 'enabled must be a boolean' }, 400);
+		let interval: number | null | undefined;
+		if (hasInterval) {
+			const parsed = parseIntervalInput(body.interval_seconds);
+			if (!parsed.ok) return c.json({ error: INTERVAL_ERROR }, 400);
+			interval = parsed.value;
+		}
+
+		updateCheckSettings(services, id, {
+			...(hasEnabled ? { enabled: body.enabled } : {}),
+			...(hasInterval ? { interval_seconds: interval } : {}),
+		});
+		scheduler.refresh();
 		return c.json({ ok: true });
+	});
+	app.patch('/api/admin/checks/batch', async (c) => {
+		const body = await c.req.json().catch(() => null);
+		if (
+			!Array.isArray(body?.ids) ||
+			body.ids.length === 0 ||
+			body.ids.some((id: unknown) => typeof id !== 'string' || !id.trim())
+		) {
+			return c.json({ error: 'Missing ids' }, 400);
+		}
+		if (body.ids.length > MAX_BATCH_CHECKS) return c.json({ error: 'Too many checks in one batch' }, 400);
+		if (!hasOwn(body, 'interval_seconds')) return c.json({ error: 'Missing interval_seconds' }, 400);
+		const parsed = parseIntervalInput(body.interval_seconds);
+		if (!parsed.ok) return c.json({ error: INTERVAL_ERROR }, 400);
+
+		const ids = [...new Set<string>(body.ids.map((id: string) => id.trim()))];
+		const checks = ids.map((id) => getCheckById(services, id));
+		if (checks.some((check) => !check)) return c.json({ error: 'Not found' }, 404);
+		if (checks.some((check) => !isModelType(check!.type))) {
+			return c.json({ error: 'Only model checks can be modified' }, 400);
+		}
+
+		setCheckIntervals(services, ids, parsed.value);
+		scheduler.refresh();
+		return c.json({ ok: true, updated: ids.length });
 	});
 	app.delete('/api/admin/checks', async (c) => {
 		const body = await c.req.json().catch(() => null);
@@ -238,6 +299,7 @@ export function createApp(
 		if (!check) return c.json({ error: 'Not found' }, 404);
 		if (!isModelType(check.type)) return c.json({ error: 'Only model checks can be deleted' }, 400);
 		deleteCheck(services, id);
+		scheduler.refresh();
 		return c.json({ ok: true });
 	});
 	app.get('/api/admin/models', async (c) => {
@@ -261,6 +323,7 @@ export function createApp(
 			checks.set(`${row.type}:${model}`, { model, type: row.type });
 		}
 		saveSelection(services, [...checks.values()]);
+		scheduler.refresh();
 		return c.json({ ok: true });
 	});
 

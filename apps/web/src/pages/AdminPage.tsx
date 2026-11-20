@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Checkbox,
 	Chip,
 	CircularProgress,
 	Dialog,
@@ -27,6 +28,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import Pagination from '@mui/material/Pagination';
 import {
+	adminBatchSetCheckIntervals,
 	adminChecks,
 	adminCreateCheck,
 	adminDeleteCheck,
@@ -35,6 +37,7 @@ import {
 	adminResults,
 	adminRun,
 	adminSetCheckEnabled,
+	adminSetCheckInterval,
 	adminSources,
 	adminSyncSources,
 	type AdminSourcesResponse,
@@ -48,6 +51,7 @@ import { getUserError } from '../messages';
 import { ModelIcon } from '../components/ModelIcon';
 import { ModelSelector } from '../components/ModelSelector';
 import { EmptyState } from '../components/EmptyState';
+import { FrequencySelect } from '../components/FrequencySelect';
 import { SectionHeader } from '../components/SectionHeader';
 import { Icon, Check, History, ListChecks, Lock, LogIn, LogOut, Play, Plus, RefreshCw, Trash2, X } from '../design/icons';
 
@@ -79,6 +83,9 @@ export function AdminPage() {
 	const [checksLoading, setChecksLoading] = useState(false);
 	const [newModel, setNewModel] = useState('');
 	const [newCheckType, setNewCheckType] = useState<ModelType>('model');
+	const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+	const [batchInterval, setBatchInterval] = useState<number | null | undefined>(undefined);
+	const [frequencyNotice, setFrequencyNotice] = useState<string | null>(null);
 
 	const [sources, setSources] = useState<AdminSourcesResponse | null>(null);
 	const [sourcesError, setSourcesError] = useState<string | null>(null);
@@ -95,6 +102,18 @@ export function AdminPage() {
 				return String(a.model).localeCompare(String(b.model));
 			});
 	}, [checks]);
+
+	const defaultModelInterval = sources?.intervals?.model ?? 30;
+	const allSelected = modelChecks.length > 0 && modelChecks.every((check: any) => selectedIds.has(check.id));
+	const someSelected = modelChecks.some((check: any) => selectedIds.has(check.id));
+
+	useEffect(() => {
+		setSelectedIds((current) => {
+			const valid = new Set(modelChecks.map((check: any) => check.id as string));
+			const next = new Set([...current].filter((id) => valid.has(id)));
+			return next.size === current.size ? current : next;
+		});
+	}, [modelChecks]);
 
 	const checksForType = (type: ModelType) => modelChecks.filter((c: any) => c.type === type);
 
@@ -435,6 +454,64 @@ export function AdminPage() {
 					/>
 
 					{checksError ? <Alert severity="error">{checksError}</Alert> : null}
+					{frequencyNotice ? <Alert severity="success">{frequencyNotice}</Alert> : null}
+
+					{selectedIds.size > 0 ? (
+						<Stack
+							direction={{ xs: 'column', sm: 'row' }}
+							spacing={1.5}
+							alignItems={{ sm: 'center' }}
+							sx={{ p: 2, bgcolor: v('surface2'), borderRadius: '10px' }}
+						>
+							<Typography variant="body2" sx={{ fontWeight: 600 }}>
+								已选 {selectedIds.size} 项
+							</Typography>
+							<FrequencySelect
+								value={batchInterval}
+								defaultSeconds={defaultModelInterval}
+								disabled={busy}
+								placeholder="选择频率"
+								ariaLabel="批量检测频率"
+								onChange={setBatchInterval}
+							/>
+							<Button
+								variant="contained"
+								startIcon={<Icon icon={Check} size={16} />}
+								disabled={busy || batchInterval === undefined}
+								onClick={async () => {
+									if (batchInterval === undefined || selectedIds.size === 0) return;
+									const count = selectedIds.size;
+									setBusy(true);
+									setChecksError(null);
+									setFrequencyNotice(null);
+									try {
+										await adminBatchSetCheckIntervals([...selectedIds], batchInterval);
+										setChecks((await adminChecks()).checks);
+										setFrequencyNotice(`已更新 ${count} 个检查项的检测频率。`);
+										setSelectedIds(new Set());
+										setBatchInterval(undefined);
+									} catch (e: any) {
+										setChecksError(getUserError(e, '批量更新失败，请稍后重试。'));
+									} finally {
+										setBusy(false);
+									}
+								}}
+							>
+								应用频率
+							</Button>
+							<Button
+								variant="text"
+								startIcon={<Icon icon={X} size={16} />}
+								disabled={busy}
+								onClick={() => {
+									setSelectedIds(new Set());
+									setBatchInterval(undefined);
+								}}
+							>
+								取消选择
+							</Button>
+						</Stack>
+					) : null}
 
 					<Stack
 						direction={{ xs: 'column', sm: 'row' }}
@@ -493,13 +570,26 @@ export function AdminPage() {
 					</Stack>
 
 					<TableContainer>
-						<Table size="small" aria-label="模型检查项" sx={{ minWidth: modelChecks.length ? 690 : undefined }}>
+						<Table size="small" aria-label="模型检查项" sx={{ minWidth: modelChecks.length ? 980 : undefined }}>
 							<TableHead sx={{ display: modelChecks.length ? undefined : 'none' }}>
 								<TableRow>
-									<TableCell width={120}>类型</TableCell>
+									<TableCell padding="checkbox">
+										<Checkbox
+											size="small"
+											checked={allSelected}
+											indeterminate={!allSelected && someSelected}
+											disabled={busy || modelChecks.length === 0}
+											inputProps={{ 'aria-label': '全选模型检查项' }}
+											onChange={(_event, checked) =>
+												setSelectedIds(checked ? new Set(modelChecks.map((check: any) => check.id as string)) : new Set())
+											}
+										/>
+									</TableCell>
+									<TableCell width={110}>类型</TableCell>
 									<TableCell>模型名称</TableCell>
-									<TableCell width={160}>启用状态</TableCell>
-									<TableCell width={100} align="right">
+									<TableCell width={190}>检测频率</TableCell>
+									<TableCell width={150}>启用状态</TableCell>
+									<TableCell width={90} align="right">
 										操作
 									</TableCell>
 								</TableRow>
@@ -507,13 +597,29 @@ export function AdminPage() {
 							<TableBody>
 								{modelChecks.length === 0 ? (
 									<TableRow>
-										<TableCell colSpan={4}>
+										<TableCell colSpan={6}>
 											<EmptyState icon={<Icon icon={ListChecks} size={18} />} title={checksLoading ? '正在加载检查项…' : '暂无模型检查项'} />
 										</TableCell>
 									</TableRow>
 								) : (
 									modelChecks.map((c: any) => (
-										<TableRow key={c.id} hover>
+										<TableRow key={c.id} hover selected={selectedIds.has(c.id)}>
+											<TableCell padding="checkbox">
+												<Checkbox
+													size="small"
+													checked={selectedIds.has(c.id)}
+													disabled={busy}
+													inputProps={{ 'aria-label': `选择 ${c.model}` }}
+													onChange={(_event, checked) => {
+														setSelectedIds((current) => {
+															const next = new Set(current);
+															if (checked) next.add(c.id);
+															else next.delete(c.id);
+															return next;
+														});
+													}}
+												/>
+											</TableCell>
 											<TableCell>
 												<TypeTag type={c.type as ModelType} />
 											</TableCell>
@@ -524,6 +630,32 @@ export function AdminPage() {
 														{c.model}
 													</Typography>
 												</Stack>
+											</TableCell>
+											<TableCell>
+												<FrequencySelect
+													value={c.interval_seconds ?? null}
+													defaultSeconds={defaultModelInterval}
+													disabled={busy}
+													ariaLabel={`检测频率 ${c.model}`}
+													onChange={async (seconds) => {
+														if (seconds === (c.interval_seconds ?? null)) return;
+														setBusy(true);
+														setChecksError(null);
+														setFrequencyNotice(null);
+														const prev = checks;
+														setChecks((cur) =>
+															(cur || []).map((x: any) => (x.id === c.id ? { ...x, interval_seconds: seconds } : x)),
+														);
+														try {
+															await adminSetCheckInterval(c.id, seconds);
+														} catch (e: any) {
+															setChecks(prev);
+															setChecksError(getUserError(e, '更新失败，请稍后重试。'));
+														} finally {
+															setBusy(false);
+														}
+													}}
+												/>
 											</TableCell>
 											<TableCell>
 												<Stack direction="row" spacing={0.5} alignItems="center">

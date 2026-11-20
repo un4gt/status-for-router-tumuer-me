@@ -14,6 +14,7 @@ type CheckDef = {
 	enabled: boolean;
 	provider: string;
 	successRate: number;
+	interval_seconds?: number | null;
 };
 
 type RegionDef = { id: string; label: string; code: string };
@@ -58,6 +59,20 @@ const REGION_FACTOR: Record<string, number> = {
 const SESSION_COOKIE = 'router_status_session';
 const MOCK_SESSION_VALUE = 'mock';
 const MOCK_ADMIN_PASSWORD = 'admin';
+const MOCK_MODEL_INTERVAL_SECONDS = 30;
+const MOCK_NETWORK_INTERVAL_SECONDS = 300;
+const MOCK_MIN_INTERVAL_SECONDS = 30;
+const MOCK_MAX_INTERVAL_SECONDS = 7 * 24 * 60 * 60;
+
+function validInterval(value: unknown): boolean {
+	return (
+		value === null ||
+		(typeof value === 'number' &&
+			Number.isInteger(value) &&
+			value >= MOCK_MIN_INTERVAL_SECONDS &&
+			value <= MOCK_MAX_INTERVAL_SECONDS)
+	);
+}
 
 const DEFAULT_CHECKS: CheckDef[] = [
 	{ id: 'net:root', type: 'head', target: 'https://emrank.tech/', model: null, enabled: true, provider: 'mock', successRate: 0.9995 },
@@ -320,6 +335,7 @@ function buildOverview(nowMs: number, window: WindowKey) {
 		return {
 			id: check.id,
 			...meta,
+			probe_interval_ms: MOCK_NETWORK_INTERVAL_SECONDS * 1000,
 			status: statusFor(stats.availability, last ? (last.success_count > 0 ? 'success' : 'failure') : null, stats.total_count),
 			last_checked_at: last?.ts ?? null,
 			stats: Object.fromEntries(
@@ -341,6 +357,7 @@ function buildOverview(nowMs: number, window: WindowKey) {
 			enabled: check.enabled,
 			provider: check.provider,
 			probe_configured: true,
+			probe_interval_ms: (check.interval_seconds ?? MOCK_MODEL_INTERVAL_SECONDS) * 1000,
 			status: worstStatus(Object.values(regions).map((region: any) => region.status)),
 			availability: stats.availability,
 			total_count: stats.total_count,
@@ -358,7 +375,10 @@ function buildOverview(nowMs: number, window: WindowKey) {
 		generated_at: nowMs,
 		mode: 'mock',
 		window,
-		topology: { target: { label: '硅谷 · 服务目标', lat: 37.3382, lng: -121.8863 }, intervals: { network: 300_000, model: 300_000 } },
+		topology: {
+			target: { label: '硅谷 · 服务目标', lat: 37.3382, lng: -121.8863 },
+			intervals: { network: MOCK_NETWORK_INTERVAL_SECONDS * 1000, model: MOCK_MODEL_INTERVAL_SECONDS * 1000 },
+		},
 		regions: REGIONS.map((region) => ({
 			...region,
 			coordinates: regionCoordinates(region),
@@ -574,7 +594,13 @@ export function mockApiPlugin(): Plugin {
 					return sendJson(res, { ok: true });
 				}
 				if (req.method === 'GET' && url.pathname === '/api/admin/checks') {
-					return sendJson(res, { checks: checksState.map((check) => ({ ...check, created_at: nowMs })) });
+					return sendJson(res, {
+						checks: checksState.map((check) => ({
+							...check,
+							interval_seconds: check.interval_seconds ?? null,
+							created_at: nowMs,
+						})),
+					});
 				}
 				if (req.method === 'POST' && url.pathname === '/api/admin/checks') {
 					const body = await readJson(req);
@@ -594,9 +620,37 @@ export function mockApiPlugin(): Plugin {
 							enabled: body.enabled !== false,
 							provider: 'mock',
 							successRate: 0.99,
+							interval_seconds: null,
 						},
 					];
 					return sendJson(res, { ok: true, id });
+				}
+				if (req.method === 'PATCH' && url.pathname === '/api/admin/checks/batch') {
+					const body = await readJson(req);
+					if (
+						!Array.isArray(body?.ids) ||
+						body.ids.length === 0 ||
+						body.ids.some((id: unknown) => typeof id !== 'string' || !id.trim())
+					) {
+						return sendJson(res, { error: 'Missing ids' }, 400);
+					}
+					if (!Object.prototype.hasOwnProperty.call(body, 'interval_seconds') || !validInterval(body.interval_seconds)) {
+						return sendJson(
+							res,
+							{ error: 'Interval must be null or an integer between 30 and 604800 seconds' },
+							400,
+						);
+					}
+					const ids = [...new Set<string>(body.ids.map((id: string) => id.trim()))];
+					const selected = ids.map((id) => checksState.find((check) => check.id === id));
+					if (selected.some((check) => !check)) return sendJson(res, { error: 'Not found' }, 404);
+					if (selected.some((check) => check!.type === 'head')) {
+						return sendJson(res, { error: 'Only model checks can be modified' }, 400);
+					}
+					checksState = checksState.map((check) =>
+						ids.includes(check.id) ? { ...check, interval_seconds: body.interval_seconds } : check,
+					);
+					return sendJson(res, { ok: true, updated: ids.length });
 				}
 				if (req.method === 'PATCH' && url.pathname === '/api/admin/checks') {
 					const body = await readJson(req);
@@ -604,9 +658,25 @@ export function mockApiPlugin(): Plugin {
 					const index = checksState.findIndex((check) => check.id === id);
 					if (index === -1) return sendJson(res, { error: 'Not found' }, 404);
 					if (checksState[index].type === 'head') return sendJson(res, { error: 'Only model checks can be modified' }, 400);
-					if (typeof body?.enabled !== 'boolean') return sendJson(res, { error: 'Missing enabled' }, 400);
+					const hasEnabled = Object.prototype.hasOwnProperty.call(body ?? {}, 'enabled');
+					const hasInterval = Object.prototype.hasOwnProperty.call(body ?? {}, 'interval_seconds');
+					if (!hasEnabled && !hasInterval) return sendJson(res, { error: 'Missing enabled or interval_seconds' }, 400);
+					if (hasEnabled && typeof body.enabled !== 'boolean') return sendJson(res, { error: 'enabled must be a boolean' }, 400);
+					if (hasInterval && !validInterval(body.interval_seconds)) {
+						return sendJson(
+							res,
+							{ error: 'Interval must be null or an integer between 30 and 604800 seconds' },
+							400,
+						);
+					}
 					checksState = checksState.map((check, position) =>
-						position === index ? { ...check, enabled: body.enabled } : check,
+						position === index
+							? {
+									...check,
+									...(hasEnabled ? { enabled: body.enabled } : {}),
+									...(hasInterval ? { interval_seconds: body.interval_seconds } : {}),
+								}
+							: check,
 					);
 					return sendJson(res, { ok: true });
 				}
@@ -623,6 +693,7 @@ export function mockApiPlugin(): Plugin {
 					return sendJson(res, {
 						mode: 'mock',
 						regions: REGIONS.map((region) => ({ ...region, globalping: '', probeUrl: null })),
+						intervals: { network: MOCK_NETWORK_INTERVAL_SECONDS, model: MOCK_MODEL_INTERVAL_SECONDS },
 						sources: {
 							globalping: { configured: true, last_sync_at: nowMs, last_error: null, last_warning: null },
 							cloudprobe: { configured: false, last_sync_at: null, last_error: null, last_warning: null },

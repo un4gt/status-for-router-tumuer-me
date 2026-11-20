@@ -13,6 +13,7 @@ export type CheckRow = {
 	created_at: number;
 	provider: string;
 	external_id: string | null;
+	interval_seconds: number | null;
 };
 export type ResultRow = {
 	id: number;
@@ -118,9 +119,36 @@ export function setCheckEnabled({ db }: Services, id: string, enabled: boolean) 
 	db.query('UPDATE checks SET enabled=? WHERE id=?').run(Number(enabled), id);
 }
 
+export function updateCheckSettings(
+	{ db }: Services,
+	id: string,
+	patch: { enabled?: boolean; interval_seconds?: number | null },
+) {
+	const assignments: string[] = [];
+	const params: Array<number | string | null> = [];
+	if (patch.enabled !== undefined) {
+		assignments.push('enabled=?');
+		params.push(Number(patch.enabled));
+	}
+	if (patch.interval_seconds !== undefined) {
+		assignments.push('interval_seconds=?');
+		params.push(patch.interval_seconds);
+	}
+	if (assignments.length === 0) return;
+	params.push(id);
+	db.query(`UPDATE checks SET ${assignments.join(', ')} WHERE id=?`).run(...params);
+}
+
+export function setCheckIntervals({ db }: Services, ids: string[], intervalSeconds: number | null) {
+	if (ids.length === 0) return;
+	const placeholders = ids.map(() => '?').join(', ');
+	db.query(`UPDATE checks SET interval_seconds=? WHERE id IN (${placeholders})`).run(intervalSeconds, ...ids);
+}
+
 export function deleteCheck({ db }: Services, id: string) {
 	db.transaction(() => {
 		db.query('DELETE FROM results WHERE check_id=?').run(id);
+		db.query('DELETE FROM meta WHERE key=? OR key=?').run(`check:${id}:last_run_at`, `check:${id}:last_attempt_at`);
 		db.query('DELETE FROM checks WHERE id=?').run(id);
 	})();
 }

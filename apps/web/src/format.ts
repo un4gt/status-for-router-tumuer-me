@@ -10,6 +10,14 @@ export function formatLatency(value: number | null | undefined): string {
 	return `${Math.round(value)} ms`;
 }
 
+export function formatInterval(seconds: number): string {
+	if (!Number.isFinite(seconds) || seconds <= 0) return '—';
+	if (seconds % 86_400 === 0) return `${seconds / 86_400} 天`;
+	if (seconds % 3_600 === 0) return `${seconds / 3_600} 小时`;
+	if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
+	return `${Math.round(seconds)} 秒`;
+}
+
 export function formatAgoShort(ts: number | null, nowMs = Date.now()): string {
 	if (!ts) return '—';
 	const delta = Math.max(0, nowMs - ts);

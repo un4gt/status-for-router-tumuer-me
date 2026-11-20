@@ -21,6 +21,27 @@ test('network and model thresholds are independent; failures and stale data domi
 	expect(worst([signalFor(undefined, 'model', 30_000, now), signalFor(stats, 'model', 30_000, now)])).toBe('unknown');
 });
 
+test('each check uses its own probe interval for staleness', () => {
+	const overview = {
+		topology: { target: { lat: 37.3382, lng: -121.8863, label: 'Target' }, intervals: { network: 300_000, model: 30_000 } },
+		regions: [{ id: 'tokyo', label: 'Tokyo', code: 'TYO', coordinates: { lat: 35.6762, lng: 139.6503 } }],
+		gateway: { endpoints: [] },
+		models: [
+			{
+				id: 'model:slow',
+				model: 'slow',
+				type: 'model',
+				enabled: true,
+				probe_interval_ms: 3_600_000,
+				regions: { tokyo: { ...stats, last_checked_at: now - 10 * 60_000 } },
+			},
+		],
+	} as unknown as OverviewResponse;
+	const data = buildGlobeData(overview, 'model', now);
+	expect(data.arcs).toHaveLength(1);
+	expect(data.arcs[0].signal).toMatchObject({ status: 'operational', stale: false });
+});
+
 test('higher latency slows flight on a shared bounded scale; missing data does not animate', () => {
 	const durations = [0, 25, 150, 500, 1500, 5000, 30000].map(animationDuration);
 	expect(durations).toEqual([...durations].sort((a, b) => a - b));

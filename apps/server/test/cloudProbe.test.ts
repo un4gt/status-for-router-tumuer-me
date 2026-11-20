@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { saveSelection } from '../src/db';
+import { getCheckById, getMeta, saveSelection } from '../src/db';
 import { DEFAULT_REGIONS } from '../src/config';
 import {
 	cloudProbeStatusToSuccess,
@@ -9,6 +9,7 @@ import {
 import { fixture } from './helpers';
 import { signScfCamRequest } from '../src/providers/scfCam';
 
+const NOW = Date.parse('2026-11-04T00:00:00.000Z');
 const REGIONS = DEFAULT_REGIONS.map((region) => ({ ...region, probeUrl: `https://${region.id}.probe.test/` }));
 
 const CLOUD_PROBE = {
@@ -183,6 +184,31 @@ describe('cloud function model probes', () => {
 		expect(result.error).toContain('TENCENTCLOUD_SECRET_KEY');
 		expect(result.inserted).toBe(0);
 		expect(calls).toHaveLength(0);
+	});
+
+	test('probes only the checks supplied by the scheduler', async () => {
+		const services = servicesWithProbe();
+		const rerank = getCheckById(services, 'rerank:rerank')!;
+		const { fetchImpl, calls } = makeFetch();
+		const result = await collectCloudProbe(services, { fetch: fetchImpl, checks: [rerank], now: NOW });
+
+		expect(result.ok).toBe(true);
+		expect(result.inserted).toBe(5);
+		expect(calls).toHaveLength(5);
+		expect(new Set(calls.map((call) => call.body.check.id))).toEqual(new Set(['rerank:rerank']));
+		expect(services.db.query('SELECT DISTINCT check_id FROM results').all()).toEqual([{ check_id: 'rerank:rerank' }]);
+	});
+
+	test('records scheduling state only for completed function responses', async () => {
+		const successServices = servicesWithProbe();
+		await collectCloudProbe(successServices, { fetch: makeFetch().fetchImpl, now: NOW });
+		expect(getMeta(successServices, 'check:model:embed:last_run_at')).toBe(String(NOW));
+		expect(getMeta(successServices, 'check:model:embed:last_attempt_at')).toBe(String(NOW));
+
+		const failedServices = servicesWithProbe();
+		await collectCloudProbe(failedServices, { fetch: makeFetch({ httpStatus: 503 }).fetchImpl, now: NOW });
+		expect(getMeta(failedServices, 'check:model:embed:last_run_at')).toBeNull();
+		expect(getMeta(failedServices, 'check:model:embed:last_attempt_at')).toBe(String(NOW));
 	});
 
 	test('sends temporary credential tokens and redacts credentials echoed in failures', async () => {

@@ -143,6 +143,7 @@ export function getSummary(services: Services, now = Date.now()) {
 			model: check.model,
 			enabled: check.enabled === 1,
 			provider: check.provider,
+			interval_seconds: check.interval_seconds,
 			last_checked_at: last?.ts ?? null,
 			last_status: last ? (last.success === 1 ? 'success' : 'failure') : null,
 			stats: finalizeStats(statsByCheck.get(check.id) ?? emptyStats()),

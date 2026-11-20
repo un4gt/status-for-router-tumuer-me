@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { insertResult, saveSelection } from '../src/db';
+import { insertResult, saveSelection, updateCheckSettings } from '../src/db';
 import { getOverview } from '../src/overview';
 import { fixture } from './helpers';
 
@@ -24,6 +24,7 @@ describe('overview aggregation', () => {
 	test('aggregates unified and per-region model health with p95 and worst-region status', () => {
 		const services = fixture({ monitoringMode: 'live' });
 		saveSelection(services, [{ model: 'embed', type: 'model' }]);
+		updateCheckSettings(services, 'model:embed', { interval_seconds: 900 });
 		const modelId = 'model:embed';
 		for (const [region, latencies, successes] of [
 			['shanghai', [100, 200, 300], [1, 1, 1]],
@@ -62,7 +63,9 @@ describe('overview aggregation', () => {
 		expect(model.status).toBe('outage');
 		expect(model.p95_ms).toBe(320);
 		expect(model.regions.shanghai.p95_ms).toBe(300);
+		expect(model.probe_interval_ms).toBe(900_000);
 		expect(model.series.series.length).toBeGreaterThan(0);
+		expect(overview.gateway.endpoints[0].probe_interval_ms).toBe(300_000);
 	});
 
 	test('separates no-data regions from failures and computes gateway region p95', () => {

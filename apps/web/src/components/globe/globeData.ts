@@ -82,7 +82,12 @@ export function buildGlobeData(overview: OverviewResponse, layer: Layer, now: nu
 			type: 'type' in check ? check.type : undefined,
 			model: 'model' in check ? check.model : undefined,
 			layer: check.layer,
-			signal: signalFor(check.regions[region.id], check.layer, overview.topology.intervals[check.layer], now),
+			signal: signalFor(
+				check.regions[region.id],
+				check.layer,
+				check.probe_interval_ms ?? overview.topology.intervals[check.layer],
+				now,
+			),
 		}));
 		const visible = links.filter((link) => layer === 'both' || link.layer === layer);
 		const node: GlobeNode = {

@@ -62,6 +62,7 @@ export type GatewayEndpoint = {
 	label: string;
 	method: 'HEAD' | 'GET';
 	path: string;
+	probe_interval_ms: number;
 	status: HealthStatus;
 	last_checked_at: number | null;
 	stats: Record<WindowKey, AvailabilityStats>;
@@ -77,6 +78,7 @@ export type ModelHealth = {
 	enabled: boolean;
 	provider: string;
 	probe_configured: boolean;
+	probe_interval_ms: number;
 	status: HealthStatus;
 	availability: number | null;
 	total_count: number;
@@ -117,6 +119,7 @@ export type OverviewResponse = {
 export type AdminSourcesResponse = {
 	mode: 'live' | 'mock' | 'direct';
 	regions: Array<{ id: string; label: string; code: string; globalping: string; probeUrl: string | null }>;
+	intervals: { network: number; model: number };
 	sources: Record<string, SourceStatus>;
 };
 
@@ -145,6 +148,7 @@ export type AdminChecksResponse = {
 		enabled: boolean;
 		created_at: number;
 		provider: string;
+		interval_seconds: number | null;
 	}>;
 };
 
@@ -301,6 +305,28 @@ export async function adminSetCheckEnabled(id: string, enabled: boolean) {
 		method: 'PATCH',
 		credentials: 'include',
 		body: JSON.stringify({ id, enabled }),
+	});
+	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
+	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);
+	return resp.json();
+}
+
+export async function adminSetCheckInterval(id: string, intervalSeconds: number | null) {
+	const resp = await apiFetch('/api/admin/checks', {
+		method: 'PATCH',
+		credentials: 'include',
+		body: JSON.stringify({ id, interval_seconds: intervalSeconds }),
+	});
+	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
+	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);
+	return resp.json();
+}
+
+export async function adminBatchSetCheckIntervals(ids: string[], intervalSeconds: number | null) {
+	const resp = await apiFetch('/api/admin/checks/batch', {
+		method: 'PATCH',
+		credentials: 'include',
+		body: JSON.stringify({ ids, interval_seconds: intervalSeconds }),
 	});
 	if (resp.status === 401) throw Object.assign(new Error('Unauthorized'), { code: 401 });
 	if (!resp.ok) throw new Error((await resp.json().catch(() => null))?.error || `HTTP ${resp.status}`);
