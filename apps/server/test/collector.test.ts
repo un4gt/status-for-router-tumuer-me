@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { runCollection } from '../src/collector';
-import { getMeta, setMeta } from '../src/db';
+import { getMeta, saveSelection, setMeta } from '../src/db';
 import { fixture } from './helpers';
 
 const NOW = Date.parse('2026-11-04T00:00:00.000Z');
@@ -45,7 +45,8 @@ describe('collection orchestration', () => {
 	test('collects at the next 30-second boundary despite timer jitter', async () => {
 		const services = fixture({ monitoringMode: 'live' });
 		services.config.cloudProbe.intervalSeconds = 30;
-		setMeta(services, 'source:cloudprobe:last_run_at', String(NOW + 4));
+		saveSelection(services, [{ model: 'embed', type: 'model' }]);
+		setMeta(services, 'check:model:embed:last_run_at', String(NOW + 4));
 		setMeta(services, 'source:globalping:last_run_at', String(NOW + 4));
 		const options = { triggeredBy: 'scheduled' as const, fetch: fakeGlobalpingFetch() };
 		const sameSlot = await runCollection(services, { ...options, now: () => NOW + 29_999 });
@@ -58,6 +59,7 @@ describe('collection orchestration', () => {
 
 	test('runs due sources independently, records errors, and forces both on manual runs', async () => {
 		const services = fixture({ monitoringMode: 'live' });
+		saveSelection(services, [{ model: 'embed', type: 'model' }]);
 		const first = await runCollection(services, { triggeredBy: 'scheduled', fetch: fakeGlobalpingFetch(), now: () => NOW });
 		expect(first.sources.globalping?.ok).toBe(true);
 		expect(first.sources.globalping?.inserted).toBe(15);

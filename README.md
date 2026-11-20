@@ -7,7 +7,7 @@
 - 统一视图与分地区视图：模型行显示整体可用率、p95、地区状态点，可展开查看每个地区的明细，也可切换成模型 × 地区矩阵。
 - `MONITORING_MODE=mock` 提供确定性多地区模拟数据，页面显著标记“模拟数据”，用于无凭据联调。
 - 管理员用户名密码登录，HttpOnly Cookie 会话有效期七天，每 IP 每分钟最多十次登录尝试。
-- 管理页支持同步模型、选择 Embedding/Reranker/Decisions/System One、查看数据源状态和立即同步。
+- 管理页支持同步模型、选择 Embedding/Reranker/Decisions/System One、逐项或批量调整检测频率、查看数据源状态和立即同步。
 
 ## Docker 部署
 
@@ -62,11 +62,11 @@ Compose 已设置 `TRUST_PROXY=true`；直接运行 Bun 并接入 Nginx 时，�
 | `MONITOR_REGIONS_FILE` | 可选地区定义 JSON；不存在时使用内置上海/北京/香港/东京/硅谷 |
 | `GLOBALPING_TARGET_URL` | `https://emrank.tech`，Globalping probe 的目标 origin |
 | `GLOBALPING_TOKEN` | 可选 Globalping API token；不配置时使用匿名额度 |
-| `GLOBALPING_INTERVAL_SECONDS` | 默认 `300`，网络层同步间隔 |
+| `GLOBALPING_INTERVAL_SECONDS` | 默认 `300`，网络层同步间隔（网络检查项无后台覆盖） |
 | `GLOBALPING_HEALTH_PATH` | 默认 `/health` |
 | `GLOBALPING_MODELS_PATH` | 默认 `/v1/models` |
 | `CLOUD_PROBE_TOKEN` | 与每个 SCF 函数的 `PROBE_TOKEN` 一致；通过 `x-probe-token` 发送 |
-| `CLOUD_PROBE_INTERVAL_SECONDS` | 默认 `30`，业务层同步间隔 |
+| `CLOUD_PROBE_INTERVAL_SECONDS` | 默认 `30`，模型检查项的默认频次；后台为单个检查项设置的频率优先 |
 | `CLOUD_PROBE_TIMEOUT_MS` | 默认 `30000`，状态站调用函数 URL 的 HTTP 超时 |
 | `CLOUD_PROBE_PROBE_TIMEOUT_MS` | 默认 `15000`，传给函数的单次上游请求超时 |
 | `CLOUD_PROBE_CONCURRENCY` | 默认 `4`，每个地区并发调用函数的数量 |
@@ -74,7 +74,7 @@ Compose 已设置 `TRUST_PROXY=true`；直接运行 Bun 并接入 Nginx 时，�
 | `TENCENTCLOUD_SECRET_KEY` | 对应 SecretKey，仅在 Bun 服务端计算签名，不发送给函数 |
 | `TENCENTCLOUD_UIN` | 主账户 UIN（数字字符串），不是 APPID，也不是子账户 UIN |
 | `TENCENTCLOUD_TOKEN` | 使用 STS 临时凭据时填写对应 Token；永久密钥留空 |
-| `CHECK_INTERVAL_SECONDS` | 调度 tick 上限，默认 `300`；实际 tick = min(本值, 两个来源间隔) |
+| `CHECK_INTERVAL_SECONDS` | 调度 tick 上限，默认 `300`；实际 tick = min(本值, 两个来源间隔, 启用检查项的最小有效频次) |
 | `DECISION_TEST_MODEL` | 默认 `typesafe/jev-latest`，直连/mock 决策探测使用的模型 |
 | `DATABASE_PATH` | `./data/status.sqlite`，相对项目根目录解析 |
 | `HOST` / `PORT` | 本地默认 `127.0.0.1` / `8787` |
@@ -96,7 +96,9 @@ CLOUD_PROBE_INTERVAL_SECONDS=30
 CHECK_INTERVAL_SECONDS=300
 ```
 
-直接运行 Bun 时，修改后重启后端进程；Docker 部署按上面的命令重建容器。调度器按固定时间边界触发：tick 取 `CHECK_INTERVAL_SECONDS`、Globalping 间隔、Cloud Probe 间隔三者的最小值（默认 30 秒），每个来源按自己的间隔判断是否到期。手动“立即同步”会同时触发两个来源，不会推迟下一次定时同步。
+直接运行 Bun 时，修改后重启后端进程；Docker 部署按上面的命令重建容器。调度器按固定时间边界触发：tick 取 `CHECK_INTERVAL_SECONDS`、Globalping 间隔、Cloud Probe 间隔和所有启用检查项有效频次的最小值（默认 30 秒）。网络层按 `GLOBALPING_INTERVAL_SECONDS` 判断是否到期；模型层按每个检查项自己的有效频次判断，只调用到期的检查项。后台修改频次后调度器会立即重算 tick。手动“立即同步”会同时触发两个来源并跑全部启用模型项，不视频次限制，也不会推迟下一次定时同步。
+
+live 模式下，模型检查项的有效频次 = 后台设置的 `interval_seconds`；未设置时继承 `CLOUD_PROBE_INTERVAL_SECONDS`。管理页可逐项设置，也可勾选多项后批量应用，支持 30 秒到 7 天。网络层检查项不在后台频次管理范围内，继续由 `GLOBALPING_INTERVAL_SECONDS` 控制；`mock`/`direct` 是本地联调模式，保持原有采集节奏。
 
 状态页在可见时每 60 秒自动更新，切回页面时立即更新；后台更新不会清空当前页面。页面的“显示范围”（最近 5 小时、24 小时等）只控制统计窗口和图表，不改变 Globalping/云函数拨测的采集频率。色块提示显示完整时间段；“上次检测”使用来源的真实检测时间，不使用时间段起点。
 
@@ -154,7 +156,7 @@ CHECK_INTERVAL_SECONDS=300
 
 #### 数据流与格式
 
-- 状态站对每个启用的模型检查、每个配置了 `probe_url` 的地区各调用一次函数 URL。
+- 状态站对每个到期的模型检查、每个配置了 `probe_url` 的地区各调用一次函数 URL；到期判断使用该检查项的后台频次或 `CLOUD_PROBE_INTERVAL_SECONDS` 默认值。
 - 函数返回与 Site24x7 `current_status` 兼容的 JSON：`{ code: 0, data: { status, last_polled_time, attribute_value, unit, down_reason, locations: [...] } }`。状态站复用原有解析逻辑，按请求对应的地区 ID 落库，来源记为 `cloudprobe`。
 - 状态映射：`1=Up`；`0/2/3=Down/Trouble/Critical` 记为失败；`5/7/9/10` 记为无数据。函数本身只返回 1 或 0。
 - 上游请求失败时函数仍返回 HTTP 200，通过 `data.status=0` 和 `data.down_reason` 表达；只有鉴权失败、参数错误或函数内部异常才返回非 200。状态站遇到函数错误时只记录“数据源错误”，不会把模型标成 Down。
@@ -298,11 +300,12 @@ docker compose up -d app
 - `POST /api/admin/login`：`{ username, password }`
 - `POST /api/admin/logout`
 - `POST /api/admin/run` / `POST /api/admin/sources/sync`：立即同步所有到期来源（并发时返回 `409`）
-- `GET /api/admin/sources`：模式、地区（含 `probeUrl`）、数据源配置/最近同步/错误
+- `GET /api/admin/sources`：模式、地区（含 `probeUrl`）、网络层/模型层默认频次、数据源配置/最近同步/错误
 - `GET /api/admin/results?check_id=...&region=...&limit=100`：也兼容 `type`/`model`
-- `GET /api/admin/checks`
+- `GET /api/admin/checks`：检查项包含 `interval_seconds`（`null` 表示继承默认频次）
 - `POST /api/admin/checks`：`{ type, model, enabled? }`，`type` 支持 `model|rerank|systemone|decisions`
-- `PATCH /api/admin/checks`：`{ id, enabled }`；只更新启用状态
+- `PATCH /api/admin/checks`：`{ id, enabled?, interval_seconds? }`；至少提供一个字段。`interval_seconds` 为 `null` 或 30–604800 的整数秒
+- `PATCH /api/admin/checks/batch`：`{ ids, interval_seconds }`；批量设置多个模型检查项的频次，整批校验、原子更新
 - `DELETE /api/admin/checks`：`{ id }`
 - `GET /api/admin/models`：返回 `{ models: [{ id, detected_type, suggested_type, unsupported }] }`
 - `PUT /api/admin/checks/selection`：`{ checks: [{ model, type }] }`，完整替换启用集合，保留未选中项的历史；空数组停用全部模型项
@@ -323,4 +326,4 @@ bun apps/server/src/public-model-cutover.ts rollback data/status.sqlite
 
 apply 必须提供不存在的备份路径，先 VACUUM INTO，再用一个 SQLite 事务改名/合并。所有历史结果保留，不按时间去重；已有目标探针保持原启停，新目标仅在原来源至少一个启用时启用。不合并不同网关地址。原检查与结果来源记录在数据库迁移日志中。
 
-回退恢复旧检查及每条旧结果的来源，迁移后产生的结果保留其实际新身份；若新身份原来不存在，该探针回退后停用。配置被编辑后拒绝自动回退。不要恢复整库丢失切换后的结果。此工具不在启动时自动执行。2026-10-17 已部署 `tumuer/router-status:deploy-20261017-public-models-8f466aa`，按网关审阅映射完成迁移，4,793 条原结果全部保留；切换后首轮 17 项定时检查全部成功。生产入口为 https://status.emrank.tech。本次 Globalping + 云函数拨测改造后，网络层默认 300 秒、模型层默认 900 秒；旧 `head:router` 保留历史但停用。
+回退恢复旧检查及每条旧结果的来源，迁移后产生的结果保留其实际新身份；若新身份原来不存在，该探针回退后停用。配置被编辑后拒绝自动回退。不要恢复整库丢失切换后的结果。此工具不在启动时自动执行。2026-10-17 已部署 `tumuer/router-status:deploy-20261017-public-models-8f466aa`，按网关审阅映射完成迁移，4,793 条原结果全部保留；切换后首轮 17 项定时检查全部成功。生产入口为 https://status.emrank.tech。本次 Globalping + 云函数拨测改造后，网络层默认 300 秒、模型层默认 30 秒（可在后台逐项覆盖）；旧 `head:router` 保留历史但停用。

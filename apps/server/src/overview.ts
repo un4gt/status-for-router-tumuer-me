@@ -1,4 +1,5 @@
 import { getMeta, listChecks, type Services } from './db';
+import { effectiveIntervalSeconds } from './intervals';
 import { getSummary, getWindowStarts, type AvailabilityStats, type WindowKey } from './summary';
 import { getBucketMs } from './timeseries';
 import { getTopology, regionCoordinates } from './topology';
@@ -31,6 +32,7 @@ export type ModelHealth = {
 	enabled: boolean;
 	provider: string;
 	probe_configured: boolean;
+	probe_interval_ms: number;
 	status: HealthStatus;
 	availability: number | null;
 	total_count: number;
@@ -48,6 +50,7 @@ export type GatewayEndpoint = {
 	label: string;
 	method: 'HEAD' | 'GET';
 	path: string;
+	probe_interval_ms: number;
 	status: HealthStatus;
 	last_checked_at: number | null;
 	stats: Record<WindowKey, AvailabilityStats>;
@@ -303,11 +306,14 @@ export function getOverview(services: Services, window: WindowKey = '24h', now =
 	const checks = summary.checks;
 	const from = getWindowStarts(now).starts[window];
 	const to = now;
-	const gatewayBucketMs = getBucketMs(window, { minBucketMs: services.config.globalping.intervalSeconds * 1000 });
-	const modelBucketMs = getBucketMs(window, { minBucketMs: services.config.cloudProbe.intervalSeconds * 1000 });
-
 	const networkChecks = checks.filter((check) => NETWORK_IDS.has(check.id));
 	const modelChecks = checks.filter((check) => MODEL_TYPES.has(check.type as string) && check.model);
+	const modelMinSeconds = Math.min(
+		services.config.cloudProbe.intervalSeconds,
+		...modelChecks.map((check) => effectiveIntervalSeconds(services, check)),
+	);
+	const gatewayBucketMs = getBucketMs(window, { minBucketMs: services.config.globalping.intervalSeconds * 1000 });
+	const modelBucketMs = getBucketMs(window, { minBucketMs: modelMinSeconds * 1000 });
 	const networkSeries = loadSeries(services, from, to, gatewayBucketMs, 'head');
 	const modelSeries = loadSeries(services, from, to, modelBucketMs, 'model');
 	const p95CheckRegion = loadP95(services, from, to, 'check_region');
@@ -369,6 +375,7 @@ export function getOverview(services: Services, window: WindowKey = '24h', now =
 			label: meta.label,
 			method: meta.method,
 			path: meta.path,
+			probe_interval_ms: services.config.globalping.intervalSeconds * 1000,
 			status: availabilityStatus(windowStats.availability, lastStatus, windowStats.total_count),
 			last_checked_at: check.last_checked_at,
 			stats: check.stats,
@@ -418,6 +425,7 @@ export function getOverview(services: Services, window: WindowKey = '24h', now =
 				enabled: check.enabled,
 				provider: check.provider,
 				probe_configured: services.config.monitoringMode !== 'live' || services.config.cloudProbe.configured,
+				probe_interval_ms: effectiveIntervalSeconds(services, check) * 1000,
 				status: rowStatus,
 				availability: windowStats.availability,
 				total_count: windowStats.total_count,

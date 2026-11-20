@@ -8,6 +8,13 @@ const errorMessages = new Map([
 	['Each model needs a valid name and an explicit model/rerank type', '请填写模型名称并选择检测类型。'],
 	['Each model needs a valid name and an explicit probe type', '请填写模型名称并选择检测类型。'],
 	['Missing enabled', '请选择启用状态。'],
+	['Missing enabled or interval_seconds', '请选择启用状态或检测频率。'],
+	['enabled must be a boolean', '启用状态格式不正确。'],
+	['Missing ids', '请选择要批量更新的检查项。'],
+	['Missing interval_seconds', '请选择检测频率。'],
+	['Too many checks in one batch', '单次批量更新的检查项过多。'],
+	['Interval must be null or an integer between 30 and 604800 seconds', '检测频率需为 30 秒到 7 天之间的整数秒。'],
+	['Only model checks can be modified', '只能修改模型检查项。'],
 	['A check run is already in progress', '已有一轮检测正在进行，请稍后重试。'],
 ]);
 

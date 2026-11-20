@@ -1,7 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { loadConfig, parseIntervalSeconds, PROJECT_ROOT } from '../src/config';
-import { deleteCheck, getCheckById, initializeChecks, insertResult, listChecks, openDatabase, saveSelection } from '../src/db';
+import {
+	deleteCheck,
+	getCheckById,
+	initializeChecks,
+	insertResult,
+	listChecks,
+	openDatabase,
+	saveSelection,
+	updateCheckSettings,
+} from '../src/db';
 import { getSummary } from '../src/summary';
 import { getBucketMs, getTimeseries } from '../src/timeseries';
 import { fixture, temporaryDirectory } from './helpers';
@@ -19,16 +28,19 @@ describe('configuration and SQLite', () => {
 		const services = fixture({ databasePath: path });
 		expect(listChecks(services).map((check) => check.id)).toEqual(['net:health', 'net:models', 'net:root']);
 		saveSelection(services, [{ model: 'custom', type: 'rerank' }]);
+		expect(getCheckById(services, 'rerank:custom')?.interval_seconds).toBeNull();
+		updateCheckSettings(services, 'rerank:custom', { interval_seconds: 300 });
 		insertResult(services, { check_id: 'rerank:custom', ts: 123, success: 1 });
 		saveSelection(services, []);
 		services.db.close();
 		services.db = openDatabase(path);
 		initializeChecks(services);
 		expect(getCheckById(services, 'rerank:custom')?.enabled).toBe(0);
+		expect(getCheckById(services, 'rerank:custom')?.interval_seconds).toBe(300);
 		expect(services.db.query('SELECT * FROM results').all()).toHaveLength(1);
 		expect(services.db.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
 		expect(services.db.query('PRAGMA foreign_keys').get()).toEqual({ foreign_keys: 1 });
-		expect(services.db.query('PRAGMA user_version').get()).toEqual({ user_version: 2 });
+		expect(services.db.query('PRAGMA user_version').get()).toEqual({ user_version: 3 });
 	});
 	test('selection is atomic, repeatable, preserves history, and leaves network checks enabled', () => {
 		const services = fixture();

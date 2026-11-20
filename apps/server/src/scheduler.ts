@@ -1,5 +1,6 @@
 import { acquireScheduledSlot, forceSetLastRunAt, type Services } from './db';
 import { runCollection } from './collector';
+import { computeSchedulerTickSeconds } from './intervals';
 
 export class RunBusyError extends Error {
 	constructor() {
@@ -13,7 +14,8 @@ export function createScheduler(services: Services, execute: SchedulerExecute = 
 	let active: Promise<unknown> | null = null;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
-	const intervalMs = services.config.schedulerTickSeconds * 1000;
+	let intervalMs = computeSchedulerTickSeconds(services) * 1000;
+	const nextDelay = () => Math.min(intervalMs - (now() % intervalMs), 2_147_483_647);
 
 	function run(triggeredBy: 'scheduled' | 'manual') {
 		if (active || stopped) {
@@ -46,11 +48,19 @@ export function createScheduler(services: Services, execute: SchedulerExecute = 
 			console.error('Unable to schedule checks');
 		}
 		// Recalculate against the clock so startup time and timer delays do not shift later runs.
-		timer = setTimeout(tick, Math.min(intervalMs - (now() % intervalMs), 2_147_483_647));
+		timer = setTimeout(tick, nextDelay());
+	}
+
+	function refresh() {
+		intervalMs = computeSchedulerTickSeconds(services) * 1000;
+		if (stopped || timer === undefined) return;
+		clearTimeout(timer);
+		timer = setTimeout(tick, nextDelay());
 	}
 
 	return {
 		run,
+		refresh,
 		start() {
 			if (timer !== undefined || stopped) return;
 			tick();

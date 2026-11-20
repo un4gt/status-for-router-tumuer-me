@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { ModelHealth, OverviewResponse, RegionStats, Series } from '../src/api';
-import { formatAgoShort, formatLatency } from '../src/format';
+import { formatAgoShort, formatInterval, formatLatency } from '../src/format';
 import { countStatuses, filterModels, modelStatus, sortModels, splitModelName, statusShares, summarize } from '../src/status';
 
 const series: Series = { from: 0, to: 3_600_000, bucket_ms: 300_000, series: [] };
@@ -23,6 +23,7 @@ const model = (name: string, status: ModelHealth['status'], availability: number
 	enabled: true,
 	provider: 'cloudprobe',
 	probe_configured: true,
+	probe_interval_ms: 30_000,
 	status,
 	availability,
 	total_count: 100,
@@ -117,6 +118,15 @@ test('the sentence never lists models; counts still split outage and degraded', 
 	expect(incident.detail).toEqual([]);
 	expect(incident.headline).toBe('部分服务出现故障');
 	expect([incident.affectedModels, incident.outageModels, incident.degradedModels, incident.totalModels]).toEqual([3, 1, 2, 4]);
+});
+
+test('frequency labels use the largest exact unit', () => {
+	expect(formatInterval(30)).toBe('30 秒');
+	expect(formatInterval(60)).toBe('1 分钟');
+	expect(formatInterval(300)).toBe('5 分钟');
+	expect(formatInterval(90)).toBe('90 秒');
+	expect(formatInterval(3600)).toBe('1 小时');
+	expect(formatInterval(86400)).toBe('1 天');
 });
 
 test('particle colour shares follow the status mix, worst first, with a visible floor', () => {

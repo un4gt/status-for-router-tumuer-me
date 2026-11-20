@@ -1,4 +1,5 @@
 import { insertResult, listChecks, type CheckRow, type Services } from '../db';
+import { markCheckAttempt, markCheckRun } from '../intervals';
 import type { RegionDefinition } from '../config';
 import type { ProviderResult } from './globalping';
 import { scfCamConfigError, signScfCamRequest } from './scfCam';
@@ -189,6 +190,7 @@ async function collectRegion(
 	region: RegionDefinition,
 	checks: CheckRow[],
 	fetchImpl: typeof fetch,
+	now: number,
 ): Promise<{ inserted: number; warnings: string[]; errors: string[] }> {
 	const warnings: string[] = [];
 	const errors: string[] = [];
@@ -197,6 +199,9 @@ async function collectRegion(
 	await mapWithConcurrency(checks, services.config.cloudProbe.concurrency, async (check) => {
 		try {
 			const body = await requestProbe(services, region, check, fetchImpl);
+			// A valid function response is a completed measurement even when the
+			// model itself is down or returns no interpretable location data.
+			markCheckRun(services, check.id, now);
 			const data = body.data ?? {};
 			for (const result of probeTargets(services, region, check, data, warnings)) {
 				insertResult(services, {
@@ -212,6 +217,7 @@ async function collectRegion(
 				inserted++;
 			}
 		} catch (error) {
+			markCheckAttempt(services, check.id, now);
 			errors.push(`${check.id}@${region.id}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	});
@@ -221,9 +227,10 @@ async function collectRegion(
 
 export async function collectCloudProbe(
 	services: Services,
-	opts: { fetch?: typeof fetch } = {},
+	opts: { fetch?: typeof fetch; checks?: CheckRow[]; now?: number } = {},
 ): Promise<ProviderResult> {
 	const fetchImpl = opts.fetch ?? fetch;
+	const now = opts.now ?? Date.now();
 	const warnings: string[] = [];
 	const details: Record<string, unknown> = {};
 
@@ -239,11 +246,19 @@ export async function collectCloudProbe(
 	const unconfigured = services.config.regions.filter((region) => !region.probeUrl).map((region) => region.id);
 	if (unconfigured.length > 0) warnings.push(`未配置云函数拨测地址：${unconfigured.join(', ')}`);
 
-	const checks = listChecks(services).filter(
-		(check) => check.enabled === 1 && MODEL_TYPES.has(check.type) && Boolean(check.model),
-	);
+	const checks =
+		opts.checks ??
+		listChecks(services).filter(
+			(check) => check.enabled === 1 && MODEL_TYPES.has(check.type) && Boolean(check.model),
+		);
 	if (checks.length === 0) {
-		return { ok: true, error: null, inserted: 0, warnings: ['没有启用的模型检查项'], details };
+		return {
+			ok: true,
+			error: null,
+			inserted: 0,
+			warnings: [opts.checks ? '没有到期的模型检查项' : '没有启用的模型检查项'],
+			details,
+		};
 	}
 
 	const errors: string[] = [];
@@ -251,7 +266,7 @@ export async function collectCloudProbe(
 	await Promise.all(
 		regions.map(async (region) => {
 			try {
-				const result = await collectRegion(services, region, checks, fetchImpl);
+				const result = await collectRegion(services, region, checks, fetchImpl, now);
 				inserted += result.inserted;
 				warnings.push(...result.warnings);
 				errors.push(...result.errors);

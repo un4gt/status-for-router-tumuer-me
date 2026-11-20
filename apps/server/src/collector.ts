@@ -3,6 +3,7 @@ import { runAllChecks } from './checkRunner';
 import { collectGlobalping, type ProviderResult } from './providers/globalping';
 import { collectCloudProbe } from './providers/cloudProbe';
 import { collectMock } from './providers/mock';
+import { dueModelChecks } from './intervals';
 
 export type CollectionResult = {
 	ok: boolean;
@@ -11,10 +12,14 @@ export type CollectionResult = {
 	sources: Record<string, Pick<ProviderResult, 'ok' | 'error' | 'inserted'>>;
 };
 
+function sourceBackoffActive(services: Services, source: string, now: number): boolean {
+	const backoff = Number(getMeta(services, `source:${source}:backoff_until`));
+	return Number.isFinite(backoff) && backoff > now;
+}
+
 function isDue(services: Services, source: string, intervalSeconds: number, now: number, force: boolean): boolean {
 	if (force) return true;
-	const backoff = Number(getMeta(services, `source:${source}:backoff_until`));
-	if (Number.isFinite(backoff) && backoff > now) return false;
+	if (sourceBackoffActive(services, source, now)) return false;
 	const last = Number(getMeta(services, `source:${source}:last_run_at`));
 	if (!Number.isFinite(last) || last <= 0) return true;
 	// Match the scheduler's clock boundaries; millisecond timer jitter must
@@ -101,9 +106,11 @@ export async function runCollection(
 		);
 	}
 
-	if (isDue(services, 'cloudprobe', services.config.cloudProbe.intervalSeconds, now, force)) {
+	const dueChecks =
+		!force && sourceBackoffActive(services, 'cloudprobe', now) ? [] : dueModelChecks(services, now, force);
+	if (dueChecks.length > 0) {
 		jobs.push(
-			collectCloudProbe(services, { fetch: opts.fetch })
+			collectCloudProbe(services, { fetch: opts.fetch, checks: dueChecks, now })
 				.then((result) => {
 					recordSource(services, 'cloudprobe', result, now);
 					sources.cloudprobe = summarize(result);
